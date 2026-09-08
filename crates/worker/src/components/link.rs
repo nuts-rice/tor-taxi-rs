@@ -27,7 +27,7 @@ pub struct Link {
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
-pub enum Status {
+pub enum LinkStatus {
     Red,
     Orange,
     White,

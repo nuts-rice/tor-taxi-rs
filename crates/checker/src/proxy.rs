@@ -4,6 +4,10 @@ use reqwest::{Client, Proxy};
 use std::time::Duration;
 use tracing::{info, warn};
 
+
+pub const CHECK_INTERVAL: Duration = Duration::from_mins(15);
+
+
 /// A fresh SOCKS username. Tor isolates circuits per username/password pair, so
 /// a new identity here means a new circuit for the next probe.
 pub fn random_identity() -> String {
@@ -37,3 +41,15 @@ pub fn build_client(
 
     builder.build().context("failed to build probe client")
 }
+
+
+pub async fn verify_isolation(socks_addr: &str) -> Result<bool> {
+let id_a = random_identity();
+    let id_b = random_identity();
+
+}
+
+pub async fn fetch_status(client: &Client, url: &str) -> Result<String> {
+}
+
+pub async fn map_status(status: &str) ->    Result<>

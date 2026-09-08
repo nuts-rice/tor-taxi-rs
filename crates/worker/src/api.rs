@@ -1,5 +1,5 @@
 use leptos::prelude::*;
-
+use crate::components::Link;
 #[cfg(feature = "ssr")]
 #[derive(Debug)]
 pub enum LinkError {
@@ -20,30 +20,18 @@ impl std::fmt::Display for LinkError {
 #[cfg(feature = "ssr")]
 impl std::error::Error for LinkError {}
 
-/// Probes `url` and reports back the HTTP status the origin answered with.
-#[server(GetLinkStatus)]
-pub async fn get_link_status(url: String) -> Result<String, ServerFnError> {
+/// This is a D1 read  
+#[server(GetLinks)]
+pub async fn get_links()-> Result<Vec<Link>, ServerFnError> {
     use anyhow::anyhow;
-
-    // The Workers runtime is single-threaded and `reqwest`'s wasm futures are
-    // `!Send`, so wrap the request so the server fn future stays `Send`.
-    let status = send_wrapper::SendWrapper::new(async move {
-        let client = reqwest::Client::new();
-        let resp = client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| LinkError::RequestError(anyhow!("request failed: {e}")))?;
-
-        Ok::<_, LinkError>(resp.status())
-    })
-    .await?;
-
-    if status.is_server_error() {
-        return Err(LinkError::ResponseError(anyhow!("origin returned {status}")).into());
-    }
-
-    Ok(status.to_string())
+    use worker::send::SendFuture;
+    let Extension(env) = leptos_axum::extract::<Extension<Arc<worker::Env>>>().await?;
+    SendFuture::new(async move {
+        let db = env.d1("links-prod")?;
+        db.prepare("SELECT url, category, description, status, latency_ms, \
+            last_checked_at FROM links ORDER BY category, url ")
+            .all().await?.results()
+    }).await
 }
 
 #[server(SayHello)]

@@ -5,7 +5,10 @@ CREATE TABLE IF NOT EXISTS Links (
   url TEXT NOT NULL,
   description TEXT,
   status TEXT NOT NULL DEFAULT 'active',
-  category TEXT NOT NULL DEFAULT 'News'
+  category TEXT NOT NULL DEFAULT 'News',
+  consecutive_failures INTEGER NOT NULL DEFAULT 0,
+  last_good_at TIMESTAMP,
+  last_checked_at TIMESTAMP,
 );
  
 INSERT INTO
