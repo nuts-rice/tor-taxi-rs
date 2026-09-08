@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = ["crates/worker", "crates/checker"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["nuts_rice <red44443@gmail.com>"]
+
+# Shared by the Worker (reads status out of D1) and the checker (writes it in),
+# so the two stay on one version of the wire types.
+[workspace.dependencies]
+anyhow = "1.0.104"
+serde = { version = "1.0.229", features = ["derive"] }
+
+[profile.release]
+opt-level = "s"   # optimize for size in release builds
+lto = true
+strip = true
+codegen-units = 1
