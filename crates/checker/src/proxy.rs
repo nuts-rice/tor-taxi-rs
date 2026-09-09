@@ -4,6 +4,10 @@ use reqwest::{Client, Proxy};
 use std::time::Duration;
 use tracing::{info, warn};
 
+/// Onion services commonly sit behind anti-DDoS layers that reject requests
+/// with no User-Agent
+const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0";
+
 /// A fresh SOCKS username. Tor isolates circuits per username/password pair, so
 /// a new identity here means a new circuit for the next probe.
 pub fn random_identity() -> String {
@@ -25,6 +29,7 @@ pub fn build_client(
 
     let mut builder = Client::builder()
         .proxy(proxy)
+        .user_agent(USER_AGENT)
         .timeout(timeout)
         .danger_accept_invalid_certs(true); // onion services are rarely CA-signed
 

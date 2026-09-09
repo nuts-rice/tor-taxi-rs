@@ -34,6 +34,11 @@ pub struct Args {
     /// Probe once and exit, instead of looping. Useful for a first run.
     #[arg(long)]
     pub once: bool,
+
+    /// Probe and report, but do not write to D1. Needs no credentials, so it is
+    /// the way to try a new link before committing it to links.toml.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[tokio::main]
@@ -47,18 +52,22 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
     // Fail fast on missing credentials rather than after the first full sweep.
-    let d1 = d1::D1Client::from_env()?;
+    let d1 = if args.dry_run {
+        None
+    } else {
+        Some(d1::D1Client::from_env()?)
+    };
 
     // Advisory only. If Tor is not up yet, the sweep below will say so far more
     // clearly than a startup probe can.
     match proxy::verify_isolation(&args.socks_addr).await {
         Ok(true) => tracing::info!("circuit isolation confirmed"),
         Ok(false) => tracing::warn!("circuit isolation looks disabled"),
-        Err(e) => tracing::warn!(error = %e, "could not verify circuit isolation"),
+        Err(e) => tracing::warn!(error = ?e, "could not verify circuit isolation"),
     }
 
     loop {
-        if let Err(e) = sweep(&args, &d1).await {
+        if let Err(e) = sweep(&args, d1.as_ref()).await {
             // A Tor hiccup or a transient API error must not kill the service;
             // the next sweep gets another go.
             tracing::error!(error = ?e, "sweep failed");
@@ -71,7 +80,7 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn sweep(args: &Args, d1: &d1::D1Client) -> Result<()> {
+async fn sweep(args: &Args, d1: Option<&d1::D1Client>) -> Result<()> {
     // Re-read every sweep so adding a link does not need a restart.
     let links = links::load(&args.links)?;
     tracing::info!(count = links.len(), "starting sweep");
@@ -94,5 +103,11 @@ async fn sweep(args: &Args, d1: &d1::D1Client) -> Result<()> {
     }
     tracing::info!(up, down = results.len() - up, "sweep complete");
 
-    d1.flush(&links, &results).await
+    match d1 {
+        Some(d1) => d1.flush(&links, &results).await,
+        None => {
+            tracing::info!("dry run: skipping the D1 write");
+            Ok(())
+        }
+    }
 }

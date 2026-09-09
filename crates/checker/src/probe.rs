@@ -12,17 +12,10 @@ pub struct ProbeResult {
     pub slug: String,
     pub ok: bool,
     pub latency_ms: Option<u64>,
-    /// Why it failed, for the log. Not written to D1 -- the page shows a dot,
-    /// not a stack trace.
     pub error: Option<String>,
 }
 
 /// Probes the whole set, bounded to `concurrency` circuits at a time.
-///
-/// Deliberately returns `Vec<ProbeResult>` and not `Result<_>`: a dead onion is
-/// the normal case and the entire point of the exercise, so one link failing
-/// must never stop the other results from reaching D1. Only a failure to build
-/// a client at all is reported per-link, as `ok: false`.
 pub async fn probe_all(
     links: &LinkSet,
     socks_addr: &str,
@@ -68,7 +61,7 @@ async fn probe_one(client: &reqwest::Client, slug: &str, url: &str) -> ProbeResu
             }
         }
         Err(e) => {
-            tracing::warn!(slug, error = %e, latency_ms, "down");
+            tracing::warn!(slug, error = ?e, latency_ms, "down");
             ProbeResult {
                 slug: slug.to_string(),
                 ok: false,
