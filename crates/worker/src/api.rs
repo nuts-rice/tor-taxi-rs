@@ -1,40 +1,45 @@
 use leptos::prelude::*;
-use crate::components::Link;
-#[cfg(feature = "ssr")]
-#[derive(Debug)]
-pub enum LinkError {
-    RequestError(anyhow::Error),
-    ResponseError(anyhow::Error),
-}
 
-#[cfg(feature = "ssr")]
-impl std::fmt::Display for LinkError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LinkError::RequestError(e) => write!(f, "request error: {e}"),
-            LinkError::ResponseError(e) => write!(f, "response error: {e}"),
-        }
-    }
-}
+use crate::components::link::Link;
 
-#[cfg(feature = "ssr")]
-impl std::error::Error for LinkError {}
-
-/// This is a D1 read  
+/// Reads the directory out of D1.
+///
+/// The Worker never probes anything itself: the Workers runtime has no SOCKS
+/// and no Tor, so it cannot reach a hidden service. `crates/checker` does the
+/// probing from a host that can, and this only reports what it wrote.
 #[server(GetLinks)]
-pub async fn get_links()-> Result<Vec<Link>, ServerFnError> {
-    use anyhow::anyhow;
-    use worker::send::SendFuture;
-    let Extension(env) = leptos_axum::extract::<Extension<Arc<worker::Env>>>().await?;
-    SendFuture::new(async move {
-        let db = env.d1("links-prod")?;
-        db.prepare("SELECT url, category, description, status, latency_ms, \
-            last_checked_at FROM links ORDER BY category, url ")
-            .all().await?.results()
-    }).await
-}
+pub async fn get_links() -> Result<Vec<Link>, ServerFnError> {
+    use std::sync::Arc;
 
-#[server(SayHello)]
-pub async fn say_hello(num: i32) -> Result<String, ServerFnError> {
-    Ok(format!("Hello from the API!!! I got {num}"))
+    use axum::Extension;
+    use worker::send::SendFuture;
+
+    // Layered onto the router in lib.rs so server fns can reach the bindings.
+    let Extension(env): Extension<Arc<worker::Env>> = leptos_axum::extract()
+        .await
+        .map_err(|e| ServerFnError::new(format!("no Worker env: {e}")))?;
+
+    // `Env` and `D1Database` are Send, but the futures off `.all()` wrap
+    // `JsFuture` and are not. Workers is single-threaded, so this is sound.
+    SendFuture::new(async move {
+        let db = env
+            .d1("prod_links")
+            .map_err(|e| ServerFnError::new(format!("no D1 binding: {e}")))?;
+
+        // Age is computed in SQL rather than from the clock at render time, so
+        // the server and the hydrated client agree on the same number.
+        let rows = db
+            .prepare(
+                "SELECT slug, url, category, description, status, latency_ms, \
+                 (strftime('%s', 'now') - last_checked_at) AS checked_ago_secs \
+                 FROM links ORDER BY category, slug",
+            )
+            .all()
+            .await
+            .map_err(|e| ServerFnError::new(format!("D1 query failed: {e}")))?;
+
+        rows.results::<Link>()
+            .map_err(|e| ServerFnError::new(format!("unexpected row shape: {e}")))
+    })
+    .await
 }

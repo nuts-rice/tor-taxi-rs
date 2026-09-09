@@ -4,10 +4,6 @@ use reqwest::{Client, Proxy};
 use std::time::Duration;
 use tracing::{info, warn};
 
-
-pub const CHECK_INTERVAL: Duration = Duration::from_mins(15);
-
-
 /// A fresh SOCKS username. Tor isolates circuits per username/password pair, so
 /// a new identity here means a new circuit for the next probe.
 pub fn random_identity() -> String {
@@ -35,21 +31,40 @@ pub fn build_client(
     if reuse_connections {
         info!(identity, "reusing connections for this circuit");
     } else {
-        warn!(identity, "pooling disabled; every probe opens a fresh circuit");
         builder = builder.pool_max_idle_per_host(0);
     }
 
     builder.build().context("failed to build probe client")
 }
 
-
+/// Confirms the SOCKS port really is isolating circuits per identity, by asking
+/// Tor what exit it would use for two different identities.
+///
+/// Worth running once at startup: if isolation is off, every probe shares one
+/// circuit and a single slow service stalls the whole sweep.
 pub async fn verify_isolation(socks_addr: &str) -> Result<bool> {
-let id_a = random_identity();
-    let id_b = random_identity();
+    const CHECK_URL: &str = "https://check.torproject.org/api/ip";
 
+    async fn exit_ip(socks_addr: &str, identity: &str) -> Result<String> {
+        let client = build_client(socks_addr, identity, Duration::from_secs(30), true)?;
+        let body = client
+            .get(CHECK_URL)
+            .send()
+            .await
+            .context("could not reach the Tor check service")?
+            .text()
+            .await?;
+        Ok(body)
+    }
+
+    let a = exit_ip(socks_addr, &random_identity()).await?;
+    let b = exit_ip(socks_addr, &random_identity()).await?;
+
+    let isolated = a != b;
+    if !isolated {
+        // Not fatal: two identities can legitimately land on the same exit. It
+        // is only a hint that IsolateSOCKSAuth may not be on.
+        warn!("both identities saw the same exit; circuit isolation may be off");
+    }
+    Ok(isolated)
 }
-
-pub async fn fetch_status(client: &Client, url: &str) -> Result<String> {
-}
-
-pub async fn map_status(status: &str) ->    Result<>

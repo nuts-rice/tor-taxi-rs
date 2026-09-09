@@ -4,11 +4,37 @@
 //! and writes the resulting status into D1. The Cloudflare Worker only ever
 //! reads that table — the Workers runtime has no Tor and cannot reach .onion.
 
+mod d1;
+mod links;
+mod probe;
 mod proxy;
+mod status;
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
+use clap::Parser;
+
+#[derive(Debug, Parser)]
+#[command(about = "Probe onion links over Tor and write their status to D1")]
+pub struct Args {
+    /// Time between sweeps, e.g. `15m`, `90s`, `1h`.
+    #[arg(long, value_parser = humantime::parse_duration, default_value = "15m")]
+    pub interval: Duration,
+
+    /// The canonical link set.
+    #[arg(long, default_value = "crates/checker/links.toml")]
+    pub links: PathBuf,
+
+    /// Tor's SOCKS port.
+    #[arg(long, env = "TOR_SOCKS_ADDR", default_value = "127.0.0.1:9050")]
+    pub socks_addr: String,
+
+    /// Probe once and exit, instead of looping. Useful for a first run.
+    #[arg(long)]
+    pub once: bool,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -19,14 +45,54 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let socks_addr =
-        std::env::var("TOR_SOCKS_ADDR").unwrap_or_else(|_| "127.0.0.1:9050".to_string());
-    let identity = proxy::random_identity();
-    let _client = proxy::build_client(&socks_addr, &identity, Duration::from_secs(30), false)?;
+    let args = Args::parse();
+    // Fail fast on missing credentials rather than after the first full sweep.
+    let d1 = d1::D1Client::from_env()?;
 
-    // TODO: read the link set, probe each URL over `_client`, and push the
-    // results into D1 (Cloudflare REST API or `wrangler d1 execute`).
-    tracing::info!(%socks_addr, %identity, "checker ready; probe loop not wired up yet");
+    // Advisory only. If Tor is not up yet, the sweep below will say so far more
+    // clearly than a startup probe can.
+    match proxy::verify_isolation(&args.socks_addr).await {
+        Ok(true) => tracing::info!("circuit isolation confirmed"),
+        Ok(false) => tracing::warn!("circuit isolation looks disabled"),
+        Err(e) => tracing::warn!(error = %e, "could not verify circuit isolation"),
+    }
 
-    Ok(())
+    loop {
+        if let Err(e) = sweep(&args, &d1).await {
+            // A Tor hiccup or a transient API error must not kill the service;
+            // the next sweep gets another go.
+            tracing::error!(error = ?e, "sweep failed");
+        }
+
+        if args.once {
+            return Ok(());
+        }
+        tokio::time::sleep(args.interval).await;
+    }
+}
+
+async fn sweep(args: &Args, d1: &d1::D1Client) -> Result<()> {
+    // Re-read every sweep so adding a link does not need a restart.
+    let links = links::load(&args.links)?;
+    tracing::info!(count = links.len(), "starting sweep");
+
+    let results = probe::probe_all(
+        &links,
+        &args.socks_addr,
+        status::PROBE_TIMEOUT,
+        status::PROBE_CONCURRENCY,
+    )
+    .await;
+
+    let up = results.iter().filter(|r| r.ok).count();
+    for failed in results.iter().filter(|r| !r.ok) {
+        tracing::warn!(
+            slug = %failed.slug,
+            reason = failed.error.as_deref().unwrap_or("unknown"),
+            "link down"
+        );
+    }
+    tracing::info!(up, down = results.len() - up, "sweep complete");
+
+    d1.flush(&links, &results).await
 }

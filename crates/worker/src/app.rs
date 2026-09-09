@@ -1,14 +1,14 @@
 use leptos::prelude::*;
-use leptos_meta::{provide_meta_context, Stylesheet};
 #[cfg(feature = "ssr")]
 use leptos_meta::MetaTags;
+use leptos_meta::{provide_meta_context, Stylesheet};
 use leptos_router::{
     components::{Route, Router, Routes},
     StaticSegment,
 };
 
-use crate::components::link::{Link, LinkCategory, ShowLink, Status};
-use crate::components::show_data_from_api::ShowDataFromApi;
+use crate::api::get_links;
+use crate::components::link::ShowLink;
 
 #[cfg(feature = "ssr")]
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -53,14 +53,9 @@ pub fn App() -> impl IntoView {
 /// Renders the home page of your application.
 #[component]
 fn HomePage() -> impl IntoView {
-    // Placeholder directory until the link set is loaded from D1.
-    let links = vec![Link {
-        id: 0,
-        url: "https://tor.taxi".to_string(),
-        status: Status::White,
-        category: LinkCategory::Info,
-        description: "The directory itself.".to_string(),
-    }];
+    // One fetch for the whole page. Blocking so the directory is in the HTML
+    // the crawler and the no-JS reader get, not painted in afterwards.
+    let links = Resource::new_blocking(|| (), |_| get_links());
 
     view! {
         <div class="container">
@@ -70,13 +65,28 @@ fn HomePage() -> impl IntoView {
             <p>
                 "Inspired by original tor.taxi. Written in Rust using Leptos framework. 🦀"
             </p>
+
+            <Suspense fallback=|| view! { <p class="loading">"Loading directory…"</p> }>
+                {move || Suspend::new(async move {
+                    match links.await {
+                        Ok(links) => {
+                            view! {
+                                <ul class="links">
+                                    {links
+                                        .into_iter()
+                                        .map(|link| view! { <ShowLink link=link /> })
+                                        .collect_view()}
+                                </ul>
+                            }
+                                .into_any()
+                        }
+                        Err(e) => {
+                            view! { <p class="error">{format!("Could not load links: {e}")}</p> }
+                                .into_any()
+                        }
+                    }
+                })}
+            </Suspense>
         </div>
-        <ul class="links">
-            {links
-                .into_iter()
-                .map(|link| view! { <ShowLink link=link /> })
-                .collect_view()}
-        </ul>
-        <ShowDataFromApi />
     }
 }

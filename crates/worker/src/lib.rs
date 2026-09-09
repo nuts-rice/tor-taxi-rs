@@ -1,5 +1,5 @@
-mod app;
 mod api;
+mod app;
 mod components;
 
 #[cfg(feature = "ssr")]
@@ -16,8 +16,8 @@ async fn fetch(
     use leptos_axum::{generate_route_list, LeptosRoutes};
     use tower_service::Service;
 
-    use app::{App, shell};
-    
+    use app::{shell, App};
+
     let conf = get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
     let routes = generate_route_list(App);
