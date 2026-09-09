@@ -18,8 +18,16 @@ leptos_meta = { version = "0.8" }
 leptos_router = { version = "0.8" }
 serde.workspace = true
 tower-service = "0.3"
-wasm-bindgen = "0.2.105"
-worker = { version = "0.8", features = ["http", "axum", "d1"], optional = true }
+# Pinned exactly: worker-build downloads a wasm-bindgen CLI matching whatever
+# version resolves here. 0.2.128's catch-wrapper codegen fails against this
+# build with "externref table required for catch wrappers".
+wasm-bindgen = "=0.2.125"
+# Pinned exactly, not "0.8". worker 0.8.4 moved to wasm-streams 0.6 while
+# leptos still pins server_fn with features=["browser"] -> wasm-streams 0.5.
+# Both export `IntoUnderlyingByteSource` to wasm-bindgen, and being
+# semver-incompatible cargo keeps both, so worker-build fails with
+# "exported multiple times". 0.8.3 is the newest release still on 0.5.
+worker = { version = "=0.8.3", features = ["http", "axum", "d1"], optional = true }
 
 [features]
 hydrate = ["leptos/hydrate"]

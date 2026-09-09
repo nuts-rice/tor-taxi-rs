@@ -1,11 +1,12 @@
 //! One sweep: probe every link over its own Tor circuit.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use futures::stream::{self, StreamExt};
 
 use crate::links::LinkSet;
 use crate::proxy::{build_client, random_identity};
+use crate::status::Policy;
 
 #[derive(Debug, Clone)]
 pub struct ProbeResult {
@@ -16,18 +17,13 @@ pub struct ProbeResult {
 }
 
 /// Probes the whole set, bounded to `concurrency` circuits at a time.
-pub async fn probe_all(
-    links: &LinkSet,
-    socks_addr: &str,
-    timeout: Duration,
-    concurrency: usize,
-) -> Vec<ProbeResult> {
+pub async fn probe_all(links: &LinkSet, socks_addr: &str, policy: &Policy) -> Vec<ProbeResult> {
     stream::iter(links.iter())
         .map(|(slug, link)| async move {
             // A fresh identity per link, so each gets its own circuit and a slow
             // service cannot drag down the one probed after it.
             let identity = random_identity();
-            match build_client(socks_addr, &identity, timeout, false) {
+            match build_client(socks_addr, &identity, policy.timeout, false) {
                 Ok(client) => probe_one(&client, slug, &link.url).await,
                 Err(e) => ProbeResult {
                     slug: slug.clone(),
@@ -37,7 +33,7 @@ pub async fn probe_all(
                 },
             }
         })
-        .buffer_unordered(concurrency)
+        .buffer_unordered(policy.concurrency)
         .collect()
         .await
 }

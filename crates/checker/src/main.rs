@@ -39,6 +39,33 @@ pub struct Args {
     /// the way to try a new link before committing it to links.toml.
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Per-probe network timeout.
+    #[arg(long, value_parser = humantime::parse_duration, default_value = "60s")]
+    pub timeout: Duration,
+
+    /// A reachable link slower than this is reported as degraded, not healthy.
+    #[arg(long, value_parser = humantime::parse_duration, default_value = "10s")]
+    pub orange_after: Duration,
+
+    /// Consecutive failed sweeps before a link is reported as down.
+    #[arg(long, default_value_t = 3)]
+    pub red_after: u32,
+
+    /// How many links to probe at once, each on its own Tor circuit.
+    #[arg(long, default_value_t = 8)]
+    pub concurrency: usize,
+}
+
+impl Args {
+    fn policy(&self) -> status::Policy {
+        status::Policy {
+            timeout: self.timeout,
+            orange_after: self.orange_after,
+            red_after: self.red_after,
+            concurrency: self.concurrency,
+        }
+    }
 }
 
 #[tokio::main]
@@ -85,13 +112,8 @@ async fn sweep(args: &Args, d1: Option<&d1::D1Client>) -> Result<()> {
     let links = links::load(&args.links)?;
     tracing::info!(count = links.len(), "starting sweep");
 
-    let results = probe::probe_all(
-        &links,
-        &args.socks_addr,
-        status::PROBE_TIMEOUT,
-        status::PROBE_CONCURRENCY,
-    )
-    .await;
+    let policy = args.policy();
+    let results = probe::probe_all(&links, &args.socks_addr, &policy).await;
 
     let up = results.iter().filter(|r| r.ok).count();
     for failed in results.iter().filter(|r| !r.ok) {
@@ -104,7 +126,7 @@ async fn sweep(args: &Args, d1: Option<&d1::D1Client>) -> Result<()> {
     tracing::info!(up, down = results.len() - up, "sweep complete");
 
     match d1 {
-        Some(d1) => d1.flush(&links, &results).await,
+        Some(d1) => d1.flush(&links, &results, &policy).await,
         None => {
             tracing::info!("dry run: skipping the D1 write");
             Ok(())

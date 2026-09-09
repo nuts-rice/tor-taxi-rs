@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 use crate::links::LinkSet;
 use crate::probe::ProbeResult;
-use crate::status::{ORANGE_STATUS_THRESHOLD, RED_STATUS_THRESHOLD};
+use crate::status::Policy;
 
 /// Brings the row in line with `links.toml`
 const UPSERT_SQL: &str = "\
@@ -65,17 +65,25 @@ impl D1Client {
     }
 
     /// One request per sweep rather than one per link.
-    pub async fn flush(&self, links: &LinkSet, results: &[ProbeResult]) -> Result<()> {
+    pub async fn flush(
+        &self,
+        links: &LinkSet,
+        results: &[ProbeResult],
+        policy: &Policy,
+    ) -> Result<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .context("system clock is before the unix epoch")?
             .as_secs();
 
-        let orange_ms = ORANGE_STATUS_THRESHOLD.as_millis() as u64;
+        let orange_ms = policy.orange_after.as_millis() as u64;
         let mut batch: Vec<Value> = Vec::with_capacity(results.len() * 2);
 
         for result in results {
+            // Results are derived from `links`, so a miss means the two drifted
+            // apart mid-sweep. Say so rather than dropping the row silently.
             let Some(link) = links.get(&result.slug) else {
+                tracing::warn!(slug = %result.slug, "probe result has no matching link; skipping");
                 continue;
             };
 
@@ -91,7 +99,7 @@ impl D1Client {
                     result.latency_ms,
                     now,
                     orange_ms,
-                    RED_STATUS_THRESHOLD,
+                    policy.red_after,
                 ],
             }));
         }
