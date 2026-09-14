@@ -3,31 +3,43 @@
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::sync::LazyLock;
+
+use shared::LinkStatus;
 
 use crate::links::LinkSet;
 use crate::probe::ProbeResult;
-use crate::status::Policy;
+use crate::status::StatusPolicy;
 
-/// Brings the row in line with `links.toml`
+/// Brings the row in line with `links.toml`. Must run before RECORD_SQL for a
+/// brand-new slug: RECORD_SQL's `consecutive_failures + 1` reads a row that
+/// only exists because this statement created it with the column's DEFAULT 0.
 const UPSERT_SQL: &str = "\
 INSERT INTO links (slug, url, category, description) VALUES (?1, ?2, ?3, ?4) \
 ON CONFLICT(slug) DO UPDATE SET \
   url = excluded.url, category = excluded.category, description = excluded.description";
 
-/// Applies the status rule.
-const RECORD_SQL: &str = "\
-UPDATE links SET \
-  consecutive_failures = CASE WHEN ?2 = 1 THEN 0 ELSE consecutive_failures + 1 END, \
-  latency_ms = ?3, \
-  last_good_at = CASE WHEN ?2 = 1 THEN ?4 ELSE last_good_at END, \
-  last_checked_at = ?4, \
-  status = CASE \
-    WHEN ?2 = 1 AND ?3 >= ?5 THEN 'Orange' \
-    WHEN ?2 = 1 THEN 'White' \
-    WHEN consecutive_failures + 1 >= ?6 THEN 'Red' \
-    ELSE 'Orange' \
-  END \
-WHERE slug = ?1";
+/// Applies the status rule. Built once at first use because the status literals
+/// come from `LinkStatus::as_sql()` rather than being typed in here.
+static RECORD_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE links SET \
+           consecutive_failures = CASE WHEN ?2 = 1 THEN 0 ELSE consecutive_failures + 1 END, \
+           latency_ms = ?3, \
+           last_good_at = CASE WHEN ?2 = 1 THEN ?4 ELSE last_good_at END, \
+           last_checked_at = ?4, \
+           status = CASE \
+             WHEN ?2 = 1 AND ?3 >= ?5 THEN '{orange}' \
+             WHEN ?2 = 1 THEN '{white}' \
+             WHEN consecutive_failures + 1 >= ?6 THEN '{red}' \
+             ELSE '{orange}' \
+           END \
+         WHERE slug = ?1",
+        white = LinkStatus::White.as_sql(),
+        orange = LinkStatus::Orange.as_sql(),
+        red = LinkStatus::Red.as_sql(),
+    )
+});
 
 pub struct D1Client {
     http: reqwest::Client,
@@ -64,12 +76,11 @@ impl D1Client {
         })
     }
 
-    /// One request per sweep rather than one per link.
     pub async fn flush(
         &self,
         links: &LinkSet,
         results: &[ProbeResult],
-        policy: &Policy,
+        policy: &StatusPolicy,
     ) -> Result<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -92,11 +103,11 @@ impl D1Client {
                 "params": [result.slug, link.url, link.category, link.description],
             }));
             batch.push(json!({
-                "sql": RECORD_SQL,
+                "sql": RECORD_SQL.as_str(),
                 "params": [
                     result.slug,
-                    if result.ok { 1 } else { 0 },
-                    result.latency_ms,
+                    if result.is_up() { 1 } else { 0 },
+                    result.latency_ms(),
                     now,
                     orange_ms,
                     policy.red_after,
@@ -142,4 +153,14 @@ impl D1Client {
 
 fn env(key: &str) -> Result<String> {
     std::env::var(key).with_context(|| format!("{key} must be set"))
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn write_is_succesful() {}
+
+    #[test]
+    fn flush_is_succesful() {}
 }

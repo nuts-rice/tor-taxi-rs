@@ -1,60 +1,6 @@
 use leptos::prelude::*;
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
-pub enum LinkCategory {
-    News,
-    Search,
-    Email,
-    Market,
-    Exchange,
-    ImageUpload,
-    Info,
-    Escrow,
-    Forum,
-    Service,
-}
-
-/// One row of the `links` table. Field names match the columns selected in
-/// [`crate::api::get_links`]; the `CHECK` constraints in `schema.sql` are what
-/// guarantee `category` and `status` deserialize.
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
-pub struct Link {
-    pub slug: String,
-    pub url: String,
-    pub category: LinkCategory,
-    pub description: String,
-    /// `None` until the checker has probed it at least once. Not the same as
-    /// down -- we simply do not know yet.
-    pub status: Option<Status>,
-    pub latency_ms: Option<u64>,
-    pub checked_ago_secs: Option<i64>,
-}
-
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone, Copy)]
-pub enum Status {
-    Red,
-    Orange,
-    White,
-}
-
-impl Status {
-    fn css_class(self) -> &'static str {
-        match self {
-            Status::Red => "status red",
-            Status::Orange => "status orange",
-            Status::White => "status white",
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Status::Red => "down",
-            Status::Orange => "degraded",
-            Status::White => "up",
-        }
-    }
-}
+pub use shared::Link;
 
 fn humanize(secs: i64) -> String {
     match secs {
@@ -81,7 +27,7 @@ pub fn ShowLink(link: Link) -> impl IntoView {
             <span class=class title=label></span>
             <div class="body">
                 <a href=link.url.clone() rel="noopener noreferrer">{link.slug.clone()}</a>
-                <span class="category">{format!("{:?}", link.category)}</span>
+                <span class="category">{link.category.label()}</span>
                 <p class="description">{link.description.clone()}</p>
                 <p class="meta">
                     {label}

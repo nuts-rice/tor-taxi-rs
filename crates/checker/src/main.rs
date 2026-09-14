@@ -13,6 +13,8 @@ mod status;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::probe::{Outcome, ProbePolicy};
+use crate::status::StatusPolicy;
 use anyhow::Result;
 use clap::Parser;
 
@@ -40,32 +42,11 @@ pub struct Args {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Per-probe network timeout.
-    #[arg(long, value_parser = humantime::parse_duration, default_value = "60s")]
-    pub timeout: Duration,
+    #[command(flatten)]
+    pub probe_policy: ProbePolicy,
 
-    /// A reachable link slower than this is reported as degraded, not healthy.
-    #[arg(long, value_parser = humantime::parse_duration, default_value = "10s")]
-    pub orange_after: Duration,
-
-    /// Consecutive failed sweeps before a link is reported as down.
-    #[arg(long, default_value_t = 3)]
-    pub red_after: u32,
-
-    /// How many links to probe at once, each on its own Tor circuit.
-    #[arg(long, default_value_t = 8)]
-    pub concurrency: usize,
-}
-
-impl Args {
-    fn policy(&self) -> status::Policy {
-        status::Policy {
-            timeout: self.timeout,
-            orange_after: self.orange_after,
-            red_after: self.red_after,
-            concurrency: self.concurrency,
-        }
-    }
+    #[command(flatten)]
+    pub status_policy: StatusPolicy,
 }
 
 #[tokio::main]
@@ -94,14 +75,17 @@ async fn main() -> Result<()> {
     }
 
     loop {
-        if let Err(e) = sweep(&args, d1.as_ref()).await {
+        let swept = sweep(&args, d1.as_ref()).await;
+        if let Err(e) = &swept {
             // A Tor hiccup or a transient API error must not kill the service;
             // the next sweep gets another go.
             tracing::error!(error = ?e, "sweep failed");
         }
 
+        // Propagated rather than discarded: deploy/pi/entrypoint.sh treats the
+        // checker's exit status as the verdict of a --once verification run.
         if args.once {
-            return Ok(());
+            return swept;
         }
         tokio::time::sleep(args.interval).await;
     }
@@ -112,21 +96,21 @@ async fn sweep(args: &Args, d1: Option<&d1::D1Client>) -> Result<()> {
     let links = links::load(&args.links)?;
     tracing::info!(count = links.len(), "starting sweep");
 
-    let policy = args.policy();
-    let results = probe::probe_all(&links, &args.socks_addr, &policy).await;
+    let results = probe::probe_all(&links, &args.socks_addr, &args.probe_policy).await?;
 
-    let up = results.iter().filter(|r| r.ok).count();
-    for failed in results.iter().filter(|r| !r.ok) {
-        tracing::warn!(
-            slug = %failed.slug,
-            reason = failed.error.as_deref().unwrap_or("unknown"),
-            "link down"
-        );
+    let mut up = 0;
+    for result in &results {
+        match &result.outcome {
+            Outcome::Reachable { .. } => up += 1,
+            Outcome::Unreachable { reason } => {
+                tracing::warn!(slug = %result.slug, reason, "link down");
+            }
+        }
     }
     tracing::info!(up, down = results.len() - up, "sweep complete");
 
     match d1 {
-        Some(d1) => d1.flush(&links, &results, &policy).await,
+        Some(d1) => d1.flush(&links, &results, &args.status_policy).await,
         None => {
             tracing::info!("dry run: skipping the D1 write");
             Ok(())
