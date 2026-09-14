@@ -1,6 +1,21 @@
+# Deny by default, then admit exactly what the checker build needs. The Worker
+# is not built here at all -- it runs on Cloudflare -- but its manifest and
+# sources must be present because cargo loads every workspace member before it
+# will build any one of them.
 *
 
-!/.docker
-!/src
-!/Cargo.lock
-!/Cargo.toml
+!Cargo.toml
+!Cargo.lock
+!.cargo
+!crates
+!deploy/pi
+
+# Re-excluded after !crates, which would otherwise drag in ~240MB: the Worker's
+# JS toolchain and build output have nothing to do with the checker binary.
+crates/worker/node_modules
+crates/worker/build
+crates/worker/assets
+crates/worker/style
+crates/worker/end2end
+**/target
+**/*.rs.bk
