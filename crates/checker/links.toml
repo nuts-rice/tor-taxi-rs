@@ -14,3 +14,18 @@ url = "http://jqibjqqagao3peozxfs53tr6aecoyvctumfsc2xqniu4xgcrksal2iqd.onion/"
 description = "OPSEC bible"
 category = "Info"
 
+
+[monero_observer]
+url = "http://ttq5m3lsdhjysspvof6m72lbygclzyeelvn3wgjj7m3fr4djvbgepwyd.onion/"
+description = "The Monero observer"
+category = "News"
+
+[dump_li]
+url = "https://dumpliwoard5qsrrsroni7bdiishealhky4snigbzfmzcquwo3kml4id.onion/"
+description = "dump li image upload"
+category = "ImageUpload"
+
+[feather_wallet]
+url = "http://featherdvtpi7ckdbkb2yxjfwx3oyvr3xjz3oo4rszylfzjdg6pbm3id.onion/"
+description = "feather wallet"
+category = "Service"

@@ -40,3 +40,16 @@ pub fn ShowLink(link: Link) -> impl IntoView {
         </li>
     }
 }
+
+
+
+#[cfg(test)]
+mod tests {
+use crate::*;
+fn humanize_works() {
+        use crate::components::link;
+        let actual = link::humanize(7000) ;
+        let expected = "116m ago".to_string();
+        assert_eq!(actual, expected);
+    }
+}
