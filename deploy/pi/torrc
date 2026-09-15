@@ -1,41 +1,23 @@
-[Unit]
-Description=tor-taxi onion link checker (Tor + prober)
-Requires=docker.service
-After=docker.service network-online.target
-Wants=network-online.target
-StartLimitIntervalSec=0
+# Tor for the checker, and nothing else. Loopback-bound, never published.
 
+# IsolateSOCKSAuth is already the default, but the checker depends on it
+# totally: proxy.rs hands every probe a fresh SOCKS username so each link gets
+# its own circuit. It is what proxy::verify_isolation() checks at startup.
+SocksPort 9050 IsolateSOCKSAuth
 
-[Service]
-Type=exec
-Restart=always
-RestartSec=30
+# A named volume, so entry guards survive a restart -- the state entrypoint.sh's
+# TERM trap exists to flush.
+DataDirectory /var/lib/tor
 
-TimeoutStartSec=0
-TimeoutStopSec=60
+# entrypoint.sh reads this stream to decide when Tor is ready, watching for
+# "Bootstrapped 100%". Send Tor's log anywhere else and the checker never
+# starts: entrypoint waits out BOOTSTRAP_TIMEOUT and the container exits 1.
+Log notice stdout
 
-Environment=IMAGE=tor-taxi-checker:latest
-Environment=CONTAINER=tor-taxi-checker
-Environment=TOR_VOLUME=tor-taxi-tor-data
+# PID 1 has to stay in the foreground; daemonising exits the container.
+RunAsDaemon 0
 
-ExecStartPre=-/usr/bin/docker rm -f ${CONTAINER}
-ExecStartPre=/usr/bin/docker volume create ${TOR_VOLUME}
+ClientOnly 1
 
-ExecStart=/usr/bin/docker run --rm --name ${CONTAINER} \
-    --env-file /etc/tor-taxi/checker.env \
-    --volume ${TOR_VOLUME}:/var/lib/tor \
-    --volume /etc/tor-taxi/links.toml:/etc/tor-taxi/links.toml:ro \
-    --log-driver journald \
-    --memory 512m \
-    --pids-limit 256 \
-    --cap-drop ALL \
-    --security-opt no-new-privileges \
-    --read-only \
-    --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m \
-    ${IMAGE}
-
-
-ExecStop=/usr/bin/docker stop -t 30 ${CONTAINER}   
-
-[Install]
-+WantedBy=multi-user.target
+# The Pi boots off an SD card and Tor writes state eagerly by default.
+AvoidDiskWrites 1

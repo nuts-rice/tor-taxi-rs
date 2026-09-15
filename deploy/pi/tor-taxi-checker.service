@@ -1,0 +1,45 @@
+[Unit]
+Description=tor-taxi onion link checker (Tor + prober)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+Restart=always
+RestartSec=30
+
+TimeoutStartSec=0
+TimeoutStopSec=60
+
+Environment=IMAGE=tor-taxi-checker:latest
+Environment=CONTAINER=tor-taxi-checker
+Environment=TOR_VOLUME=tor-taxi-tor-data
+
+ExecStartPre=-/usr/bin/docker rm -f ${CONTAINER}
+ExecStartPre=/usr/bin/docker volume create ${TOR_VOLUME}
+
+# Not EnvironmentFile=: that would put the Cloudflare token in this unit's
+# environment, where `systemctl show` prints it back. --env-file is read by
+# docker and never passes through systemd.
+#
+# --read-only is the first thing to drop if a new tor package misbehaves.
+ExecStart=/usr/bin/docker run --rm --name ${CONTAINER} \
+    --env-file /etc/tor-taxi/checker.env \
+    --volume ${TOR_VOLUME}:/var/lib/tor \
+    --volume /etc/tor-taxi/links.toml:/etc/tor-taxi/links.toml:ro \
+    --log-driver journald \
+    --memory 512m \
+    --pids-limit 256 \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --read-only \
+    --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m \
+    ${IMAGE}
+
+# -t 30 so TERM reaches entrypoint.sh's trap and Tor flushes its guards.
+ExecStop=/usr/bin/docker stop -t 30 ${CONTAINER}
+
+[Install]
+WantedBy=multi-user.target
