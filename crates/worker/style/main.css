@@ -1,3 +1,29 @@
+/* Hack, self-hosted. Not Google Fonts: a webfont fetched from a third party
+   hands that party the IP and Referer of everyone who opens this directory,
+   which is the last thing this audience wants.
+
+   Subset to Latin-1 + punctuation (106K -> 15K per face). Anything outside
+   that range -- the crab, in particular -- falls through to the stack below,
+   which is also what Tor Browser's Safest mode gets, since it blocks webfonts
+   outright. MIT; see assets/fonts/LICENSE.md, served at /fonts/LICENSE.md.
+
+   Paths are absolute because this sheet is served from /pkg/, not /. */
+@font-face {
+  font-family: "Hack";
+  src: url("/fonts/hack-regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hack";
+  src: url("/fonts/hack-bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg: #0e0e0e;
   --fg: #d8d8d8;
@@ -13,7 +39,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: 15px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 15px/1.55 "Hack", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .container { max-width: 46rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }

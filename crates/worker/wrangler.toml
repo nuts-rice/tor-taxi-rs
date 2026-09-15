@@ -21,3 +21,14 @@ binding = "prod_links"
 database_name = "prod-links"
 database_id = "e068c0b1-827b-408d-9e94-220ba77d6c33"
 
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
+
+[observability.traces]
+enabled = false
+head_sampling_rate = 1
+persist = true
