@@ -1,6 +1,11 @@
 name = "tor-taxi-rs-worker"
 main = "build/index.js"
 compatibility_date = "2026-09-08"
+workers_dev = true          
+routes = [
+  { pattern = "tor-rs.cab",     custom_domain = true },
+  { pattern = "www.tor-rs.cab", custom_domain = true },
+]
 
 # worker-build is pinned exactly. 0.8.4+ pass --force-enable-abort-handler to
 # wasm-bindgen, which then needs catch wrappers and fails this build with
@@ -15,3 +20,4 @@ directory = "../../target/site"
 binding = "prod_links"
 database_name = "prod-links"
 database_id = "e068c0b1-827b-408d-9e94-220ba77d6c33"
+

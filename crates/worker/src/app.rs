@@ -59,11 +59,12 @@ fn HomePage() -> impl IntoView {
 
     view! {
         <div class="container">
-            <h1>"tor-taxi.rs - A link resource for darknet"</h1>
+            <h1>"tor-rs.cab - A link resource for darknet"</h1>
             <p>"Links in red are experiencing downtime"</p>
             <p>"Links in orange are experiencing DDoS attack or maintenance"</p>
             <p>
                 "Inspired by original tor.taxi. Written in Rust using Leptos framework. 🦀"
+
             </p>
 
             <Suspense fallback=|| view! { <p class="loading">"Loading directory…"</p> }>
@@ -86,6 +87,9 @@ fn HomePage() -> impl IntoView {
                         }
                     }
                 })}
+        <p> "Intended for research purposes etc etc..." </p>
+        <p> "If you believe a link should be added or removed please contact at:" </p>
+        <p> "0x0fSoftworks@protonmail.com" </p>
             </Suspense>
         </div>
     }
