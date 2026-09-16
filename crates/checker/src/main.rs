@@ -4,7 +4,7 @@
 //! and writes the resulting status into D1. The Cloudflare Worker only ever
 //! reads that table — the Workers runtime has no Tor and cannot reach .onion.
 
-mod d1;
+pub mod d1;
 mod links;
 mod probe;
 mod proxy;

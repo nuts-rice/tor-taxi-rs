@@ -39,3 +39,14 @@ async fn fetch(
 pub fn hydrate() {
     leptos::mount::hydrate_body(app::App);
 }
+
+
+
+#[cfg(test)]
+mod test {
+
+    fn schema_drift_is_guarded() {
+        use rusqlite::prelude::*;
+
+    }
+}

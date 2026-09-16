@@ -14,14 +14,14 @@ use crate::status::StatusPolicy;
 /// Brings the row in line with `links.toml`. Must run before RECORD_SQL for a
 /// brand-new slug: RECORD_SQL's `consecutive_failures + 1` reads a row that
 /// only exists because this statement created it with the column's DEFAULT 0.
-const UPSERT_SQL: &str = "\
+pub const UPSERT_SQL: &str = "\
 INSERT INTO links (slug, url, category, description) VALUES (?1, ?2, ?3, ?4) \
 ON CONFLICT(slug) DO UPDATE SET \
   url = excluded.url, category = excluded.category, description = excluded.description";
 
 /// Applies the status rule. Built once at first use because the status literals
 /// come from `LinkStatus::as_sql()` rather than being typed in here.
-static RECORD_SQL: LazyLock<String> = LazyLock::new(|| {
+pub static RECORD_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "UPDATE links SET \
            consecutive_failures = CASE WHEN ?2 = 1 THEN 0 ELSE consecutive_failures + 1 END, \
