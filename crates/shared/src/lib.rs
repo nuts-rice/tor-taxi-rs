@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
+
 /// Mirrors the `CHECK (category IN (...))` list in `schema.sql`.
 ///
 /// Serde matches variant names exactly, so the SQL spelling and the Rust
@@ -25,6 +26,7 @@ pub enum LinkCategory {
     Escrow,
     Forum,
     Service,
+    Unknown,
 }
 
 impl LinkCategory {
@@ -42,6 +44,7 @@ impl LinkCategory {
             LinkCategory::Escrow => "Escrow",
             LinkCategory::Forum => "Forum",
             LinkCategory::Service => "Service",
+            _ => "Unknown",
         }
     }
 }

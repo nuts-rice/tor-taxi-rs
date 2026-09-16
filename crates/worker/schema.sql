@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS links (
   -- deserialize on the read side.
   category             TEXT NOT NULL CHECK (category IN (
                          'News', 'Search', 'Email', 'Market', 'Exchange',
-                         'ImageUpload', 'Info', 'Escrow', 'Forum', 'Service'
+                         'ImageUpload', 'Info', 'Escrow', 'Forum', 'Service', 'Unknown'
                        )),
   description          TEXT NOT NULL DEFAULT '',
 
