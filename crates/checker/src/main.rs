@@ -117,3 +117,45 @@ async fn sweep(args: &Args, d1: Option<&d1::D1Client>) -> Result<()> {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::d1::RECORD_SQL;
+    use crate::d1::UPSERT_SQL;
+    use crate::links::LinkEntry;
+    use crate::links::LinkSet;
+    use shared::LinkStatus;
+    use std::collections::BTreeMap;
+    use std::sync::LazyLock;
+    #[test]
+    fn status_rule_is_matching() {
+        use std::time::Duration;
+        let expected_orange_dur = Duration::from_secs(25);
+        let expected_red_fails = 4;
+        let now = std::time::Instant::now();
+
+        //sleep for 25 and then check baseline known url?
+    }
+    #[test]
+    fn schema_drift_is_guarded() {
+        use rusqlite::*;
+        use serde_json::{json, Value};
+
+        use crate::probe::ProbeResult;
+        let schema = include_str!("../../worker/schema.sql");
+        let conn = Connection::open_in_memory().unwrap();
+        let actual_upsert_1 = conn.execute(UPSERT_SQL, []).unwrap();
+        let actual_record_1 = conn.execute(&RECORD_SQL, []).unwrap();
+
+        conn.execute(
+            UPSERT_SQL,
+            [
+                "NewVariant",
+                "http://2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion/",
+                "NewCategory",
+                "New Variant",
+            ],
+        )
+        .unwrap();
+    }
+}

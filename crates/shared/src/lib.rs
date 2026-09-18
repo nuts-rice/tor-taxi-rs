@@ -9,7 +9,6 @@
 
 use serde::{Deserialize, Serialize};
 
-
 /// Mirrors the `CHECK (category IN (...))` list in `schema.sql`.
 ///
 /// Serde matches variant names exactly, so the SQL spelling and the Rust

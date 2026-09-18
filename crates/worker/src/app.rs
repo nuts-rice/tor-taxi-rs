@@ -62,7 +62,8 @@ fn HomePage() -> impl IntoView {
             <p>"Links with an orange dot are experiencing DDoS attack or maintenance"</p>
             <p> "Inspired by original tor.taxi. Frontend in Rust using Leptos framework." </p>
             <p> "Checker probe is Rust as well.  🦀"
-                
+            <h4> "Onion routing for this site should be working in Tor Browser."</h4>
+
 
             </p>
 
@@ -86,7 +87,7 @@ fn HomePage() -> impl IntoView {
                         }
                     }
                 })}
-        <p> "Intended for research purposes etc etc..." </p>        
+        <p> "Intended for research purposes etc etc..." </p>
         <p> "If you believe a link should be added or removed please contact at:" </p>
         <p> "0x0fSoftworks@protonmail.com" </p>
             </Suspense>
