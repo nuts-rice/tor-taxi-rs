@@ -43,11 +43,22 @@ pub fn ShowLink(link: Link) -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use crate::*;
-    fn humanize_works() {
-        use crate::components::link;
-        let actual = link::humanize(7000);
-        let expected = "116m ago".to_string();
-        assert_eq!(actual, expected);
+    use super::humanize;
+
+    #[test]
+    fn humanize_reads_as_a_person_would_say_it() {
+        assert_eq!(
+            humanize(-3),
+            "just now",
+            "clock skew must not read as the future"
+        );
+        assert_eq!(humanize(45), "45s ago");
+        assert_eq!(humanize(89), "89s ago");
+        assert_eq!(humanize(90), "1m ago");
+        assert_eq!(humanize(5_399), "89m ago");
+        // 5400s is the minutes/hours boundary, and the one the old test got
+        // wrong: 7000s is past it, so it reads in hours, not "116m ago".
+        assert_eq!(humanize(5_400), "1h ago");
+        assert_eq!(humanize(7_000), "1h ago");
     }
 }

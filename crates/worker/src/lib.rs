@@ -39,6 +39,3 @@ async fn fetch(
 pub fn hydrate() {
     leptos::mount::hydrate_body(app::App);
 }
-
-#[cfg(test)]
-mod test {}

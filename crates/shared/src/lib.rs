@@ -4,12 +4,32 @@
 //! checker can write is, by construction, one the Worker can render.
 //!
 //! The one copy this crate does *not* subsume is the `CHECK` constraint in
-//! `crates/worker/schema.sql`. SQLite cannot take its allowed values from Rust,
-//! so that list stays hand-maintained -- keep it in step with [`LinkCategory`].
+//! `crates/worker/migrations/0000_initial.sql`. SQLite cannot take its allowed
+//! values from Rust, so that list stays hand-maintained -- keep it in step with
+//! [`LinkCategory`]. `schema_drift_is_guarded` fails the build if it drifts.
 
 use serde::{Deserialize, Serialize};
 
-/// Mirrors the `CHECK (category IN (...))` list in `schema.sql`.
+/// The Worker's one query, and the read half of the schema contract.
+///
+/// Here rather than inline in `crates/worker/src/api.rs` so the checker's
+/// `schema_drift_is_guarded` test can prepare it against the real migrations.
+/// The Worker cannot be tested against SQLite directly -- it only compiles to
+/// wasm32 -- so this const is the only way the read side gets checked at all.
+///
+/// Column order and names match [`Link`]'s fields: D1 deserializes rows into it
+/// by name, so renaming a field without renaming it here fails at runtime.
+///
+/// `retired_at IS NULL` is the delisting filter. A retired row keeps its probe
+/// history but stops rendering; see `0001_add_retired_at.sql`.
+pub const SELECT_LINKS_SQL: &str = "\
+SELECT slug, url, category, description, status, latency_ms, \
+       (strftime('%s', 'now') - last_checked_at) AS checked_ago_secs \
+  FROM links \
+ WHERE retired_at IS NULL \
+ ORDER BY category, slug";
+
+/// Mirrors the `CHECK (category IN (...))` list in `0000_initial.sql`.
 ///
 /// Serde matches variant names exactly, so the SQL spelling and the Rust
 /// spelling are the same string.
@@ -44,7 +64,6 @@ impl LinkCategory {
             LinkCategory::Forum => "Forum",
             LinkCategory::Service => "Service",
             LinkCategory::Unknown => "Unknown",
-            _ => "Unknown",
         }
     }
 }

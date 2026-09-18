@@ -1,11 +1,15 @@
 -- The contract between the checker (writes) and the Worker (reads).
 --
--- Apply with:
---   npx wrangler d1 execute prod-links --remote --file=crates/worker/schema.sql
+-- This directory is the only source of truth for the schema. Apply it with:
+--   npx wrangler d1 migrations apply prod-links --remote
 --
--- Safe to re-run: this file only ever creates. It must never DROP -- the
--- probe history in consecutive_failures and last_good_at is the only thing
--- that makes a status dot mean anything, and it cannot be recomputed.
+-- Migrations are the only DDL: wrangler records which have run, so a fresh
+-- database and the live one converge on the same shape from the same files.
+-- Do not hand-edit an applied migration -- add a new one.
+--
+-- No migration may ever DROP -- the probe history in consecutive_failures and
+-- last_good_at is the only thing that makes a status dot mean anything, and it
+-- cannot be recomputed.
 --
 -- The link set is deliberately NOT seeded here. crates/checker/links.toml is
 -- the canonical list; the checker upserts it at the top of every sweep.
@@ -38,9 +42,7 @@ CREATE TABLE IF NOT EXISTS links (
   -- Unix seconds. SQLite has no real date type, and integers keep
   -- "checked 4m ago" to plain arithmetic on both sides.
   last_good_at         INTEGER,
-  last_checked_at      INTEGER,
-
-  retired_at           INTEGER, 
+  last_checked_at      INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS links_category ON links (category);

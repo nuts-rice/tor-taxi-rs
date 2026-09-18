@@ -11,25 +11,52 @@ use crate::links::LinkSet;
 use crate::probe::ProbeResult;
 use crate::status::StatusPolicy;
 
+/// Frees a url still held by a *retired* row, so a re-key or a slug rename can
+/// take it without tripping `UNIQUE(url)`.
+///
+/// Scoped to retired rows on purpose. Unscoped, this drops a live row -- and
+/// with it the probe history the soft delete exists to protect -- to make way
+/// for whichever slug happened to be upserted second. Two *live* entries
+/// sharing a url is an editorial mistake, and `links::load` rejects it before
+/// a sweep starts rather than letting it quietly rewrite the table here.
+///
+/// Must run after `retire_sql` and before `UPSERT_SQL` for the slug; see the
+/// ordering rationale in `build_batch`.
+pub const RELEASE_URL_SQL: &str =
+    "DELETE FROM links WHERE url = ?2 AND slug <> ?1 AND retired_at IS NOT NULL";
+
 /// Brings the row in line with `links.toml`. Must run before RECORD_SQL for a
 /// brand-new slug: RECORD_SQL's `consecutive_failures + 1` reads a row that
 /// only exists because this statement created it with the column's DEFAULT 0.
-pub const UPSERT_SQL: &str = " 
-INSERT INTO
-  links (slug, url, category, description)
-VALUES
-  (?1, ?2, ?3, ?4)
-DELETE FROM links
-WHERE
-  url = ?2
-  AND slug <> ?1
-ON CONFLICT (slug) DO UPDATE
-SET
-  url = excluded.url,
-  category = excluded.category,
-  description = excluded.description
-  retired_at = NULL  
-";
+///
+/// Clearing `retired_at` is the un-delist path: a link that comes back keeps
+/// the history it had before it was retired, rather than starting over at
+/// consecutive_failures = 0 and claiming a clean record it has not earned.
+pub const UPSERT_SQL: &str = "\
+INSERT INTO links (slug, url, category, description) VALUES (?1, ?2, ?3, ?4) \
+ON CONFLICT(slug) DO UPDATE SET \
+  url = excluded.url, category = excluded.category, \
+  description = excluded.description, retired_at = NULL";
+
+/// Retires every row whose slug is no longer in `links.toml`.
+///
+/// Built per sweep because the placeholder count follows the link set: `?1` is
+/// the timestamp, `?2..` are the live slugs. `retired_at IS NULL` in the WHERE
+/// keeps it idempotent, so the stamp records the first sweep a link went
+/// missing rather than being rewritten to `now` on every pass afterwards.
+///
+/// Self-contained by design -- it names the live set outright instead of
+/// relying on some earlier statement in the batch having marked the rows it
+/// should spare. A batch that lands only halfway cannot retire a live link.
+pub(crate) fn retire_sql(live: usize) -> String {
+    let placeholders: Vec<String> = (2..=live + 1).map(|i| format!("?{i}")).collect();
+    format!(
+        "UPDATE links SET retired_at = ?1 \
+         WHERE retired_at IS NULL AND slug NOT IN ({})",
+        placeholders.join(", ")
+    )
+}
+
 /// Applies the status rule. Built once at first use because the status literals
 /// come from `LinkStatus::as_sql()` rather than being typed in here.
 pub static RECORD_SQL: LazyLock<String> = LazyLock::new(|| {
@@ -51,6 +78,72 @@ pub static RECORD_SQL: LazyLock<String> = LazyLock::new(|| {
         red = LinkStatus::Red.as_sql(),
     )
 });
+
+/// Builds one sweep's statements, in the order they must run.
+///
+/// Separate from the HTTP send so the ordering can be tested: replaying this
+/// against a migrated SQLite database is the only way a reorder here -- which
+/// compiles fine and fails only against a real `UNIQUE(url)` -- gets caught
+/// before a deploy.
+pub(crate) fn build_batch(
+    links: &LinkSet,
+    results: &[ProbeResult],
+    policy: &StatusPolicy,
+    now: u64,
+) -> Vec<Value> {
+    let orange_ms = policy.orange_after.as_millis() as u64;
+    let mut batch: Vec<Value> = Vec::with_capacity(results.len() * 3 + 1);
+
+    // First, before any upsert. A slug renamed in links.toml arrives as a new
+    // row whose url the *old* row still holds; retiring the old one here is
+    // what lets RELEASE_URL_SQL -- which only touches retired rows -- free
+    // that url a moment later. Run this last instead and the rename hits
+    // UNIQUE(url) and takes the whole batch with it.
+    //
+    // Guarded on non-empty: an empty link set means links.toml failed to read,
+    // not that the directory is empty, and must never retire everything.
+    // `sweep` bails before this on a parse error, so reaching here with
+    // nothing is already the unexpected case.
+    if !links.is_empty() {
+        let mut params: Vec<Value> = vec![json!(now)];
+        params.extend(links.keys().map(|slug| json!(slug)));
+        batch.push(json!({
+            "sql": retire_sql(links.len()),
+            "params": params,
+        }));
+    }
+
+    for result in results {
+        // Results are derived from `links`, so a miss means the two drifted
+        // apart mid-sweep. Say so rather than dropping the row silently.
+        let Some(link) = links.get(&result.slug) else {
+            tracing::warn!(slug = %result.slug, "probe result has no matching link; skipping");
+            continue;
+        };
+
+        batch.push(json!({
+            "sql": RELEASE_URL_SQL,
+            "params": [result.slug, link.url],
+        }));
+        batch.push(json!({
+            "sql": UPSERT_SQL,
+            "params": [result.slug, link.url, link.category, link.description],
+        }));
+        batch.push(json!({
+            "sql": RECORD_SQL.as_str(),
+            "params": [
+                result.slug,
+                if result.is_up() { 1 } else { 0 },
+                result.latency_ms(),
+                now,
+                orange_ms,
+                policy.red_after,
+            ],
+        }));
+    }
+
+    batch
+}
 
 pub struct D1Client {
     http: reqwest::Client,
@@ -98,46 +191,7 @@ impl D1Client {
             .context("system clock is before the unix epoch")?
             .as_secs();
 
-        let orange_ms = policy.orange_after.as_millis() as u64;
-        let mut batch: Vec<Value> = Vec::with_capacity(results.len() * 2);
-
-        for result in results {
-            // Results are derived from `links`, so a miss means the two drifted
-            // apart mid-sweep. Say so rather than dropping the row silently.
-            let Some(link) = links.get(&result.slug) else {
-                tracing::warn!(slug = %result.slug, "probe result has no matching link; skipping");
-                continue;
-            };
-
-            batch.push(json!({
-                "sql": UPSERT_SQL,
-                "params": [result.slug, link.url, link.category, link.description],
-            }));
-            batch.push(json!({
-                "sql": RECORD_SQL.as_str(),
-                "params": [
-                    result.slug,
-                    if result.is_up() { 1 } else { 0 },
-                    result.latency_ms(),
-                    now,
-                    orange_ms,
-                    policy.red_after,
-                ],
-            }));
-        }
-if !links.is_empty() {
-    let placeholders: Vec<String> = (2..=links.len() + 1).map(|i| format!("?{i}")).collect();
-    let mut params: Vec<Value> = vec![json!(now)];
-    params.extend(links.keys().map(|s| json!(s)));
-    batch.push(json!({
-        "sql": format!(
-            "UPDATE links SET retired_at = ?1 \
-             WHERE retired_at IS NULL AND slug NOT IN ({})",
-            placeholders.join(", ")
-        ),
-        "params": params,
-    }));
-        }
+        let batch = build_batch(links, results, policy, now);
 
         if batch.is_empty() {
             return Ok(());
@@ -177,14 +231,4 @@ if !links.is_empty() {
 
 fn env(key: &str) -> Result<String> {
     std::env::var(key).with_context(|| format!("{key} must be set"))
-}
-
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn write_is_succesful() {}
-
-    #[test]
-    fn flush_is_succesful() {}
 }

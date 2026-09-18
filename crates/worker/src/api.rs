@@ -26,15 +26,15 @@ pub async fn get_links() -> Result<Vec<Link>, ServerFnError> {
             .d1("prod_links")
             .map_err(|e| ServerFnError::new(format!("no D1 binding: {e}")))?;
 
+        // The query lives in `shared` so the checker's schema_drift test can
+        // prepare it against the real migrations. Inline here, a clause in the
+        // wrong order -- WHERE before FROM -- compiles fine and only fails once
+        // it reaches D1, which for this Worker means the page never renders.
+        //
         // Age is computed in SQL rather than from the clock at render time, so
         // the server and the hydrated client agree on the same number.
         let rows = db
-            .prepare(
-                "SELECT slug, url, category, description, status, latency_ms, \
-                 (strftime('%s', 'now') - last_checked_at) AS checked_ago_secs \
-                 WHERE retired_at IS NULL \
-                 FROM links ORDER BY category, slug",
-            )
+            .prepare(shared::SELECT_LINKS_SQL)
             .all()
             .await
             .map_err(|e| ServerFnError::new(format!("D1 query failed: {e}")))?;
