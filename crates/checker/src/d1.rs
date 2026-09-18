@@ -14,13 +14,22 @@ use crate::status::StatusPolicy;
 /// Brings the row in line with `links.toml`. Must run before RECORD_SQL for a
 /// brand-new slug: RECORD_SQL's `consecutive_failures + 1` reads a row that
 /// only exists because this statement created it with the column's DEFAULT 0.
-pub const UPSERT_SQL: &str = "\
-INSERT INTO links (slug, url, category, description) VALUES (?1, ?2, ?3, ?4) \
-DELETE FROM links WHERE url = ?2 AND slug <> ?1    \
-ON CONFLICT(slug) DO UPDATE SET \
-  url = excluded.url, category = excluded.category, description = excluded.description \
-    DELETE FROM links WHERE slug NOT IN links";
-
+pub const UPSERT_SQL: &str = " 
+INSERT INTO
+  links (slug, url, category, description)
+VALUES
+  (?1, ?2, ?3, ?4)
+DELETE FROM links
+WHERE
+  url = ?2
+  AND slug <> ?1
+ON CONFLICT (slug) DO UPDATE
+SET
+  url = excluded.url,
+  category = excluded.category,
+  description = excluded.description
+  retired_at = NULL  
+";
 /// Applies the status rule. Built once at first use because the status literals
 /// come from `LinkStatus::as_sql()` rather than being typed in here.
 pub static RECORD_SQL: LazyLock<String> = LazyLock::new(|| {
@@ -115,6 +124,19 @@ impl D1Client {
                     policy.red_after,
                 ],
             }));
+        }
+if !links.is_empty() {
+    let placeholders: Vec<String> = (2..=links.len() + 1).map(|i| format!("?{i}")).collect();
+    let mut params: Vec<Value> = vec![json!(now)];
+    params.extend(links.keys().map(|s| json!(s)));
+    batch.push(json!({
+        "sql": format!(
+            "UPDATE links SET retired_at = ?1 \
+             WHERE retired_at IS NULL AND slug NOT IN ({})",
+            placeholders.join(", ")
+        ),
+        "params": params,
+    }));
         }
 
         if batch.is_empty() {

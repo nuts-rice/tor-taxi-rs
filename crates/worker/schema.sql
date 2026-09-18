@@ -38,7 +38,9 @@ CREATE TABLE IF NOT EXISTS links (
   -- Unix seconds. SQLite has no real date type, and integers keep
   -- "checked 4m ago" to plain arithmetic on both sides.
   last_good_at         INTEGER,
-  last_checked_at      INTEGER
+  last_checked_at      INTEGER,
+
+  retired_at           INTEGER, 
 );
 
 CREATE INDEX IF NOT EXISTS links_category ON links (category);

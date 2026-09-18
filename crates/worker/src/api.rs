@@ -32,6 +32,7 @@ pub async fn get_links() -> Result<Vec<Link>, ServerFnError> {
             .prepare(
                 "SELECT slug, url, category, description, status, latency_ms, \
                  (strftime('%s', 'now') - last_checked_at) AS checked_ago_secs \
+                 WHERE retired_at IS NULL \
                  FROM links ORDER BY category, slug",
             )
             .all()
