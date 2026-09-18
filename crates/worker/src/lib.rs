@@ -41,9 +41,4 @@ pub fn hydrate() {
 }
 
 #[cfg(test)]
-mod test {
-
-    fn schema_drift_is_guarded() {
-        use rusqlite::prelude::*;
-    }
-}
+mod test {}

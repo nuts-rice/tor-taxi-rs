@@ -16,8 +16,10 @@ use crate::status::StatusPolicy;
 /// only exists because this statement created it with the column's DEFAULT 0.
 pub const UPSERT_SQL: &str = "\
 INSERT INTO links (slug, url, category, description) VALUES (?1, ?2, ?3, ?4) \
+DELETE FROM links WHERE url = ?2 AND slug <> ?1    \
 ON CONFLICT(slug) DO UPDATE SET \
-  url = excluded.url, category = excluded.category, description = excluded.description";
+  url = excluded.url, category = excluded.category, description = excluded.description \
+    DELETE FROM links WHERE slug NOT IN links";
 
 /// Applies the status rule. Built once at first use because the status literals
 /// come from `LinkStatus::as_sql()` rather than being typed in here.

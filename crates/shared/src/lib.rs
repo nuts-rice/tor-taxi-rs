@@ -43,6 +43,7 @@ impl LinkCategory {
             LinkCategory::Escrow => "Escrow",
             LinkCategory::Forum => "Forum",
             LinkCategory::Service => "Service",
+            LinkCategory::Unknown => "Unknown",
             _ => "Unknown",
         }
     }
