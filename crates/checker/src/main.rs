@@ -94,7 +94,8 @@ async fn main() -> Result<()> {
 async fn sweep(args: &Args, d1: Option<&d1::D1Client>) -> Result<()> {
     // Re-read every sweep so adding a link does not need a restart.
     let links = links::load(&args.links)?;
-    tracing::info!(count = links.len(), "starting sweep");
+    tracing::info!(count = links.len(), "🔍 starting sweep");
+    let now = std::time::Instant::now();
 
     let results = probe::probe_all(&links, &args.socks_addr, &args.probe_policy).await?;
 
@@ -108,9 +109,12 @@ async fn sweep(args: &Args, d1: Option<&d1::D1Client>) -> Result<()> {
         }
     }
     tracing::info!(up, down = results.len() - up, "sweep complete");
+    let sweep_duration = now.elapsed();
+    tracing::info!("✅ Sweep complete in {:2} s", sweep_duration.as_secs_f64());
 
     match d1 {
         Some(d1) => d1.flush(&links, &results, &args.status_policy).await,
+
         None => {
             tracing::info!("dry run: skipping the D1 write");
             Ok(())
@@ -224,11 +228,6 @@ mod test {
         .unwrap()
     }
 
-    /// The point of this test: every statement the two sides run is prepared
-    /// against the real migrations. All of it is SQL in Rust string literals,
-    /// so none of it is checked by the compiler -- a clause in the wrong order
-    /// or a missing comma reaches production as a healthy-looking binary whose
-    /// every write silently fails.
     #[test]
     fn schema_drift_is_guarded() {
         let conn = migrated();
@@ -247,8 +246,6 @@ mod test {
         }
     }
 
-    /// The CHECK list in 0000_initial.sql is the one copy of the category set
-    /// that Rust cannot own, so it is the one that can drift.
     #[test]
     fn schema_rejects_an_unknown_category() {
         let conn = migrated();
