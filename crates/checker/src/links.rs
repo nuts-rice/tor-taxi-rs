@@ -8,8 +8,10 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 
+use data_encoding::BASE32_NOPAD;
+use reqwest::Url;
+use sha3::{Digest, Sha3_256};
 pub use shared::LinkEntry;
-
 /// Keyed by slug -- the table names in `links.toml` (`[dread]`, ...) -- which is
 /// also the primary key in D1. A `BTreeMap` rather than a `HashMap` so sweeps
 /// probe in a stable order and the logs are diffable between runs.
@@ -24,7 +26,54 @@ pub fn load(path: &Path) -> Result<LinkSet> {
     let set: LinkSet =
         toml::from_str(&raw).with_context(|| format!("parsing {}", path.display()))?;
     check_unique_urls(&set).with_context(|| format!("parsing {}", path.display()))?;
+    validate_set(&set).with_context(|| format!("validating {}", path.display()))?;
     Ok(set)
+}
+
+fn validate_set(set: &LinkSet) -> Result<()> {
+    for (slug, entry) in set {
+        validate_onion_address(&entry.url).with_context(|| format!("`{slug}`: {}", entry.url))?;
+    }
+    Ok(())
+}
+
+fn validate_onion_address(raw: &str) -> Result<()> {
+    const CHECKSUM_PREFIX: &[u8] = b".onion checksum";
+    const VERSION: u8 = 3;
+    let url = Url::parse(raw).context("not an url ")?;
+    if !matches!(url.scheme(), "http" | "https") {
+        bail!("scheme must be http or https: {}", url.scheme());
+    };
+
+    let host = url.host_str().context("no host")?;
+    let Some(rest) = host.strip_suffix(".onion") else {
+        bail!("{host} is not .onion url");
+    };
+    let label = rest.rsplit(".").next().unwrap_or(rest);
+    match label.len() {
+        56 => {}
+        n => bail!("{host} is {n} characters. v3 addresses are 56."),
+    };
+
+    let bytes = BASE32_NOPAD
+        .decode(label.to_ascii_uppercase().as_bytes())
+        .with_context(|| format!("{label} is not bse32"))?;
+
+    let (pubkey, tail) = bytes.split_at(32);
+    let (checksum, version) = (&tail[..2], tail[2]);
+    if version != VERSION {
+        bail!("{label} claims {version} not {VERSION} ");
+    }
+
+    let digest = Sha3_256::new()
+        .chain_update(CHECKSUM_PREFIX)
+        .chain_update(pubkey)
+        .chain_update([VERSION])
+        .finalize();
+    if checksum != &digest[..2] {
+        bail!("{label} fails checksum -- maybe a typo?  ");
+    }
+    Ok(())
 }
 
 /// Rejects two entries claiming the same url.

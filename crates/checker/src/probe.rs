@@ -90,6 +90,7 @@ async fn probe_one(client: &reqwest::Client, slug: &str, url: &str) -> ProbeResu
         // a transport failure counts as down.
         Ok(resp) => {
             tracing::info!(slug, status = %resp.status(), latency_ms = elapsed.as_millis() as u64, "up");
+            //let content_matches = assert_content_match(slug, url).await;
             Outcome::Reachable { latency: elapsed }
         }
         Err(e) => {
@@ -104,4 +105,9 @@ async fn probe_one(client: &reqwest::Client, slug: &str, url: &str) -> ProbeResu
         slug: slug.to_string(),
         outcome,
     }
+}
+
+// Downgrade to Orange?
+async fn assert_content_match(slug: &str, url: &str) -> bool {
+    true
 }

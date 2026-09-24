@@ -54,7 +54,6 @@ fn HomePage() -> impl IntoView {
     // One fetch for the whole page. Blocking so the directory is in the HTML
     // the crawler and the no-JS reader get, not painted in afterwards.
     let links = Resource::new_blocking(|| (), |_| get_links());
-
     view! {
         <div class="container">
             <h1>"tor-rs.cab - A link resource for darknet"</h1>
@@ -72,12 +71,104 @@ fn HomePage() -> impl IntoView {
                     match links.await {
                         Ok(links) => {
                             view! {
+                                <h2> "News" </h2>
                                 <ul class="links">
                                     {links
+                                        .clone()
                                         .into_iter()
-                                        .map(|link| view! { <ShowLink link=link /> })
+                                        .filter(|link| link.category.label() == "News")
+                                        .map(|link| view! { <ShowLink link=link  /> })
                                         .collect_view()}
                                 </ul>
+                                <h2> "Info" </h2>
+                                <ul class="links">
+                                    {links
+                                        .clone()
+                                        .into_iter()
+                                        .filter(|link| link.category.label() == "Info")
+                                        .map(|link| view! { <ShowLink link=link  /> })
+                                        .collect_view()}
+                                </ul>
+
+                                <h2> "Forum" </h2>
+                                <ul class="links">
+                                    {links
+                                        .clone()
+                                        .into_iter()
+                                        .filter(|link| link.category.label() == "Forum")
+                                        .map(|link| view! { <ShowLink link=link  /> })
+                                        .collect_view()}
+                                </ul>
+                                <h2> "Image Upload" </h2>
+                                <ul class="links">
+                                    {links
+                                        .clone()
+                                        .into_iter()
+                                        .filter(|link| link.category.label() == "Image Upload")
+                                        .map(|link| view! { <ShowLink link=link  /> })
+                                        .collect_view()}
+                                </ul>
+                                <h2> "Search" </h2>
+                                <ul class="links">
+                                    {links
+                                        .clone()
+                                        .into_iter()
+                                        .filter(|link| link.category.label() == "Search")
+                                        .map(|link| view! { <ShowLink link=link  /> })
+                                        .collect_view()}
+                                </ul>
+                                <h2> "Market" </h2>
+                                <ul class="links">
+                                    {links
+                                        .clone()
+                                        .into_iter()
+                                        .filter(|link| link.category.label() == "Market")
+                                        .map(|link| view! { <ShowLink link=link  /> })
+                                        .collect_view()}
+                                </ul>
+                                <h2> "Escrow" </h2>
+                                <ul class="links">
+                                    {links
+                                        .clone()
+                                        .into_iter()
+                                        .filter(|link| link.category.label() == "Escrow")
+                                        .map(|link| view! { <ShowLink link=link  /> })
+                                        .collect_view()}
+                                </ul>
+
+                                <h2> "Exchange" </h2>
+                                <ul class="links">
+                                    {links
+                                        .clone()
+                                        .into_iter()
+                                        .filter(|link| link.category.label() == "Exchange")
+                                        .map(|link| view! { <ShowLink link=link  /> })
+                                        .collect_view()}
+                                </ul>
+                                <h2> "Service" </h2>
+                                <ul class="links">
+                                    {links
+                                        .clone()
+                                        .into_iter()
+                                        .filter(|link| link.category.label() == "Service")
+                                        .map(|link| view! { <ShowLink link=link  /> })
+                                        .collect_view()}
+                                </ul>
+                                <h2> "Email" </h2>
+                                <ul class="links">
+                                    {links
+                                        .clone()
+                                        .into_iter()
+                                        .filter(|link| link.category.label() == "Email")
+                                        .map(|link| view! { <ShowLink link=link  /> })
+                                        .collect_view()}
+                                </ul>
+
+
+
+
+
+
                             }
                                 .into_any()
                         }

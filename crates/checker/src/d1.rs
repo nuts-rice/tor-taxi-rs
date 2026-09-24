@@ -225,7 +225,9 @@ impl D1Client {
                 .join("; ");
             bail!("D1 rejected the batch: {detail}");
         }
-        let after_flush_now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
+        let after_flush_now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs();
         tracing::info!("✅ flush complete in {:?}s", after_flush_now - now);
         tracing::info!(statements = batch.len(), "flushed to D1");
         Ok(())

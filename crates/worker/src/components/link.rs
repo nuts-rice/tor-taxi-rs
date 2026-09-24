@@ -27,7 +27,6 @@ pub fn ShowLink(link: Link) -> impl IntoView {
             <span class=class title=label></span>
             <div class="body">
                 <a href=link.url.clone() rel="noopener noreferrer">{link.slug.clone()}</a>
-                <span class="category">{link.category.label()}</span>
                 <p class="description">{link.description.clone()}</p>
                 <p class="meta">
                     {label}

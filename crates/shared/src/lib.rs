@@ -107,16 +107,15 @@ impl LinkStatus {
 }
 
 /// One entry in `crates/checker/links.toml` -- the editorial input.
-///
-/// `category` is the enum, not a `String`, so a typo fails at load with serde's
-/// own "unknown variant `Forumm`, expected one of ..." rather than as a row
-/// rejected by D1 halfway through a sweep.
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LinkEntry {
     pub url: String,
     pub category: LinkCategory,
     #[serde(default)]
     pub description: String,
+    // Optional for asserting matches etc...
+    pub expected_content: Option<String>,
 }
 
 /// One row of the `links` table -- the rendered output.
