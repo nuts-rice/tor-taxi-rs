@@ -79,6 +79,14 @@ pub static RECORD_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+pub const PROBE_RETENTION_SECS: u64 = 7 * 24 * 60 * 60;
+
+pub const RECORD_PROBE_SQL: &str =
+    "INSERT INTO probes (slug, checked_at, latency_ms) VALUES (?1, ?2, ?3)";
+
+/// Drops samples older than the retention window.
+pub const PRUNE_PROBES_SQL: &str = "DELETE FROM probes WHERE checked_at < ?1";
+
 /// Builds one sweep's statements, in the order they must run.
 ///
 /// Separate from the HTTP send so the ordering can be tested: replaying this
@@ -92,7 +100,7 @@ pub(crate) fn build_batch(
     now: u64,
 ) -> Vec<Value> {
     let orange_ms = policy.orange_after.as_millis() as u64;
-    let mut batch: Vec<Value> = Vec::with_capacity(results.len() * 3 + 1);
+    let mut batch: Vec<Value> = Vec::with_capacity(results.len() * 4 + 2);
 
     // First, before any upsert. A slug renamed in links.toml arrives as a new
     // row whose url the *old* row still holds; retiring the old one here is
@@ -140,7 +148,19 @@ pub(crate) fn build_batch(
                 policy.red_after,
             ],
         }));
+        batch.push(json!({
+            "sql": RECORD_PROBE_SQL,
+            "params": [result.slug, now, result.latency_ms()],
+        }));
     }
+
+    // Last, and every sweep: each pass only deletes the few rows that crossed
+    // the cutoff since the previous one, and riding in the same batch means
+    // the table cannot grow unbounded behind a separate job that died.
+    batch.push(json!({
+        "sql": PRUNE_PROBES_SQL,
+        "params": [now.saturating_sub(PROBE_RETENTION_SECS)],
+    }));
 
     batch
 }

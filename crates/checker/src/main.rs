@@ -127,7 +127,10 @@ async fn sweep(args: &Args, d1: Option<&d1::D1Client>) -> Result<()> {
 
 #[cfg(test)]
 mod test {
-    use crate::d1::{build_batch, retire_sql, RECORD_SQL, RELEASE_URL_SQL, UPSERT_SQL};
+    use crate::d1::{
+        build_batch, retire_sql, PROBE_RETENTION_SECS, PRUNE_PROBES_SQL, RECORD_PROBE_SQL,
+        RECORD_SQL, RELEASE_URL_SQL, UPSERT_SQL,
+    };
     use crate::links::LinkSet;
     use crate::probe::{Outcome, ProbeResult};
     use crate::status::StatusPolicy;
@@ -143,6 +146,7 @@ mod test {
     const MIGRATIONS: &[&str] = &[
         include_str!("../../worker/migrations/0000_initial.sql"),
         include_str!("../../worker/migrations/0001_add_retired_at.sql"),
+        include_str!("../../worker/migrations/0002_add_probes.sql"),
     ];
 
     const POLICY: StatusPolicy = StatusPolicy {
@@ -240,6 +244,8 @@ mod test {
             ("UPSERT_SQL", UPSERT_SQL.to_string()),
             ("RECORD_SQL", RECORD_SQL.to_string()),
             ("retire_sql", retire_sql(3)),
+            ("RECORD_PROBE_SQL", RECORD_PROBE_SQL.to_string()),
+            ("PRUNE_PROBES_SQL", PRUNE_PROBES_SQL.to_string()),
             // The Worker's read. It only compiles to wasm32 and cannot be
             // tested in place, so this is the one thing standing between a
             // malformed SELECT and a blank directory.
@@ -419,6 +425,41 @@ mod test {
         assert_eq!(
             rows,
             [("dread_forum".to_string(), "http://d.onion/".to_string())]
+        );
+    }
+
+    /// Every sweep leaves one sample per link, down probes as NULL, and
+    /// nothing older than the retention window survives the next sweep.
+    #[test]
+    fn probes_are_recorded_and_pruned() {
+        const A: &[(&str, &str)] = &[("a", "http://a.onion/")];
+        let conn = migrated();
+        let t0 = 1_000_000;
+
+        sweep(&conn, A, &[("a", true, Some(200))], t0);
+        sweep(&conn, A, &[("a", false, None)], t0 + 60);
+
+        let samples = |conn: &Connection| -> Vec<(i64, Option<i64>)> {
+            conn.prepare("SELECT checked_at, latency_ms FROM probes WHERE slug = 'a' ORDER BY checked_at")
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        assert_eq!(
+            samples(&conn),
+            [(t0 as i64, Some(200)), (t0 as i64 + 60, None)],
+            "a down probe is a NULL sample, not a missing one"
+        );
+
+        // One second past retention for t0, still inside it for t0 + 60.
+        let later = t0 + PROBE_RETENTION_SECS + 1;
+        sweep(&conn, A, &[("a", true, Some(300))], later);
+        assert_eq!(
+            samples(&conn),
+            [(t0 as i64 + 60, None), (later as i64, Some(300))],
+            "only samples older than the window are pruned"
         );
     }
 
