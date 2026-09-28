@@ -5,6 +5,7 @@
 //! reads that table — the Workers runtime has no Tor and cannot reach .onion.
 
 pub mod d1;
+mod display;
 mod links;
 mod probe;
 mod proxy;
@@ -15,8 +16,11 @@ use std::time::Duration;
 
 use crate::probe::{Outcome, ProbePolicy};
 use crate::status::StatusPolicy;
+
+use shared::Link;
 use anyhow::Result;
 use clap::Parser;
+use crossterm::event;
 
 #[derive(Debug, Parser)]
 #[command(about = "Probe onion links over Tor and write their status to D1")]
@@ -49,6 +53,10 @@ pub struct Args {
     pub status_policy: StatusPolicy,
 }
 
+struct App {
+    link_data: Vec<Link>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -59,15 +67,12 @@ async fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
-    // Fail fast on missing credentials rather than after the first full sweep.
     let d1 = if args.dry_run {
         None
     } else {
         Some(d1::D1Client::from_env()?)
     };
 
-    // Advisory only. If Tor is not up yet, the sweep below will say so far more
-    // clearly than a startup probe can.
     match proxy::verify_isolation(&args.socks_addr).await {
         Ok(true) => tracing::info!("circuit isolation confirmed"),
         Ok(false) => tracing::warn!("circuit isolation looks disabled"),
@@ -77,8 +82,6 @@ async fn main() -> Result<()> {
     loop {
         let swept = sweep(&args, d1.as_ref()).await;
         if let Err(e) = &swept {
-            // A Tor hiccup or a transient API error must not kill the service;
-            // the next sweep gets another go.
             tracing::error!(error = ?e, "sweep failed");
         }
 
@@ -180,6 +183,7 @@ mod test {
                         url: url.to_string(),
                         category: LinkCategory::Info,
                         description: "desc".into(),
+                        expected_content: None,
                     },
                 )
             })
