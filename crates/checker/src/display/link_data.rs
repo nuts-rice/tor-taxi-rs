@@ -7,6 +7,20 @@ use ratatui::widgets::{Block, BorderType, Borders, Cell, Row, Table};
 use crate::display::tui_app::TuiApp;
 pub use shared::{Link, LinkStatus};
 
+pub const READ_AVG_MS_UP_AND_TOTAL_SQL: &str = "SELECT slug,
+       avg(latency_ms)   AS avg_latency_ms,
+       count(latency_ms) AS up_samples,
+       count(*)          AS total_samples
+FROM probes
+WHERE checked_at >= ?1
+GROUP BY slug
+";
+
+pub const READ_AVG_MS_SQL: &str = "
+SELECT slug, avg(latency_ms) AS avg_latency_ms FROM probes GROUP BY slug
+";
+
+
 pub enum ColumnType {
     Slug,
     Average,
@@ -17,6 +31,12 @@ pub enum ColumnStatus {
     Visible,
     Hidden,
 }
+
+fn get_avg_ms( ) -> Option<f64> {
+    todo!()
+
+}
+
 
 pub fn render(f: &mut Frame<'_>, app: TuiApp, rect: Rect) {}
 

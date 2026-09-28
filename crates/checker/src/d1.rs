@@ -122,8 +122,6 @@ pub(crate) fn build_batch(
     }
 
     for result in results {
-        // Results are derived from `links`, so a miss means the two drifted
-        // apart mid-sweep. Say so rather than dropping the row silently.
         let Some(link) = links.get(&result.slug) else {
             tracing::warn!(slug = %result.slug, "probe result has no matching link; skipping");
             continue;
@@ -154,13 +152,11 @@ pub(crate) fn build_batch(
         }));
     }
 
-    // Last, and every sweep: each pass only deletes the few rows that crossed
-    // the cutoff since the previous one, and riding in the same batch means
-    // the table cannot grow unbounded behind a separate job that died.
     batch.push(json!({
         "sql": PRUNE_PROBES_SQL,
         "params": [now.saturating_sub(PROBE_RETENTION_SECS)],
     }));
+
 
     batch
 }
