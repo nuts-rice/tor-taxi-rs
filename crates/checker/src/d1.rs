@@ -87,6 +87,20 @@ pub const RECORD_PROBE_SQL: &str =
 /// Drops samples older than the retention window.
 pub const PRUNE_PROBES_SQL: &str = "DELETE FROM probes WHERE checked_at < ?1";
 
+// SQLs for getting average latency in ms for probe
+// TODO: pass avg to tui
+pub const READ_AVG_MS_UP_AND_TOTAL_SQL: &str = "SELECT slug,
+       avg(latency_ms)   AS avg_latency_ms,
+       count(latency_ms) AS up_samples,
+       count(*)          AS total_samples
+FROM probes
+WHERE checked_at >= ?1
+GROUP BY slug
+";
+
+pub const READ_AVG_MS_SQL: &str = "
+SELECT slug, avg(latency_ms) AS avg_latency_ms FROM probes GROUP BY slug";
+
 /// Builds one sweep's statements, in the order they must run.
 ///
 /// Separate from the HTTP send so the ordering can be tested: replaying this
@@ -157,6 +171,9 @@ pub(crate) fn build_batch(
         "params": [now.saturating_sub(PROBE_RETENTION_SECS)],
     }));
 
+    batch.push(json!({
+        "sql": READ_AVG_MS_SQL,
+    }));
 
     batch
 }

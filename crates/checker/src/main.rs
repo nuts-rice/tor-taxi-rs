@@ -14,13 +14,14 @@ mod status;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::display::config::TuiConfig;
 use crate::probe::{Outcome, ProbePolicy};
 use crate::status::StatusPolicy;
-
-use shared::Link;
 use anyhow::Result;
 use clap::Parser;
 use crossterm::event;
+use ratatui::widgets::TableState;
+use shared::Link;
 
 #[derive(Debug, Parser)]
 #[command(about = "Probe onion links over Tor and write their status to D1")]
@@ -53,10 +54,23 @@ pub struct Args {
     pub status_policy: StatusPolicy,
 }
 
-struct App {
+struct TuiApp {
     link_data: Vec<Link>,
+    config: TuiConfig,
+    pub table_state: TableState,
 }
-
+impl TuiApp {
+    pub fn new(tui_config: TuiConfig, link_data: Vec<Link>) -> Self {
+        Self {
+            link_data,
+            config: tui_config,
+            table_state: TableState::default(),
+        }
+    }
+}
+//Need to put get avg read here too
+//avg read is avg_latency_ms in d1
+//then get pass to tui somehow?
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -440,12 +454,14 @@ mod test {
         sweep(&conn, A, &[("a", false, None)], t0 + 60);
 
         let samples = |conn: &Connection| -> Vec<(i64, Option<i64>)> {
-            conn.prepare("SELECT checked_at, latency_ms FROM probes WHERE slug = 'a' ORDER BY checked_at")
-                .unwrap()
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-                .unwrap()
-                .map(Result::unwrap)
-                .collect()
+            conn.prepare(
+                "SELECT checked_at, latency_ms FROM probes WHERE slug = 'a' ORDER BY checked_at",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
         };
         assert_eq!(
             samples(&conn),
