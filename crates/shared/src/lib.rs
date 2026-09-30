@@ -133,3 +133,17 @@ pub struct Link {
     pub latency_ms: Option<u64>,
     pub checked_ago_secs: Option<i64>,
 }
+
+impl Link {
+    pub fn slug(&self) -> &str {
+        &self.slug
+    }
+
+    pub fn status(&self) -> &Option<LinkStatus> {
+        &self.status
+    }
+
+    pub fn latency_ms(&self) -> &Option<u64> {
+        &self.latency_ms
+    }
+}

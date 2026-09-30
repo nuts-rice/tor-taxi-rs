@@ -1,8 +1,9 @@
 use anyhow::Context;
-use ratatui::layout::Rect;
 use ratatui::Frame;
 
+use ratatui::layout::{Constraint, Rect};
 use ratatui::widgets::{Block, BorderType, Borders, Cell, Row, Table};
+
 use std::fmt::{Debug, Display, Formatter};
 
 use crate::display::{config::TuiConfig, tui_app::TuiApp};
@@ -43,6 +44,17 @@ impl Column {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Columns(Vec<Column>);
 
+impl Columns {
+    pub fn columns(&self) -> impl Iterator<Item = &Column> {
+        self.0
+            .iter()
+            .filter(|c| matches!(c.status, ColumnStatus::Visible))
+    }
+
+    pub fn all_columns(&self) -> impl Iterator<Item = &Column> {
+        self.0.iter()
+    }
+}
 /*
 fn get_avg_ms(link: &Link) -> Option<f64> {
     let db =
@@ -53,7 +65,8 @@ fn get_avg_ms(link: &Link) -> Option<f64> {
 */
 
 pub fn render(f: &mut Frame<'_>, app: TuiApp, rect: Rect) {
-    let config = &app.config;
+    //let config = &app.config;
+    todo!()
 }
 
 fn render_table_row(app: TuiApp, config: &TuiConfig) -> Row<'static> {
@@ -77,4 +90,29 @@ fn render_avg_ms(link: &Link) -> Cell<'static> {
 fn render_slug_cell(link: &Link) -> Cell<'static> {
     let slug = &link.slug;
     Cell::from(format!("{}", slug))
+}
+
+fn constraint_len_calculator(items: &[Link]) -> (u16, u16, u16) {
+    /*
+        let slug_len = items
+            .iter()
+            .map(Link::slug)
+            .map(UnicodeWidthStr::width)
+            .max()
+            .unwrap_or(0);
+        let avg_ms_len = items
+            .iter()
+            .map(Data::address)
+            .flat_map(str::lines)
+            .map(UnicodeWidthStr::width)
+            .max()
+            .unwrap_or(0);
+        let status_len = items
+            .iter()
+            .map(Data::email)
+            .map(UnicodeWidthStr::width)
+            .max()
+            .unwrap_or(0);
+    */
+    todo!()
 }

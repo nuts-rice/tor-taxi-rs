@@ -161,6 +161,7 @@ mod test {
         include_str!("../../worker/migrations/0000_initial.sql"),
         include_str!("../../worker/migrations/0001_add_retired_at.sql"),
         include_str!("../../worker/migrations/0002_add_probes.sql"),
+        include_str!("../../worker/migrations/0003_add_avg_to_probes.sql"),
     ];
 
     const POLICY: StatusPolicy = StatusPolicy {
@@ -476,6 +477,32 @@ mod test {
             samples(&conn),
             [(t0 as i64 + 60, None), (later as i64, Some(300))],
             "only samples older than the window are pruned"
+        );
+    }
+
+    /// Each sample carries the mean of the up samples in the window at the
+    /// time it was written; earlier samples keep the mean they were given.
+    #[test]
+    fn probes_carry_rolling_avg() {
+        const A: &[(&str, &str)] = &[("a", "http://a.onion/")];
+        let conn = migrated();
+        let t0 = 1_000_000;
+
+        sweep(&conn, A, &[("a", false, None)], t0);
+        sweep(&conn, A, &[("a", true, Some(200))], t0 + 60);
+        sweep(&conn, A, &[("a", true, Some(400))], t0 + 120);
+
+        let avgs: Vec<Option<f64>> = conn
+            .prepare("SELECT avg_latency_ms FROM probes WHERE slug = 'a' ORDER BY checked_at")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(
+            avgs,
+            [None, Some(200.0), Some(300.0)],
+            "down probes are excluded from the mean, and history is not rewritten"
         );
     }
 

@@ -98,8 +98,14 @@ WHERE checked_at >= ?1
 GROUP BY slug
 ";
 
-pub const READ_AVG_MS_SQL: &str = "
-SELECT slug, avg(latency_ms) AS avg_latency_ms FROM probes GROUP BY slug";
+/// Stamps this sweep's samples with the rolling mean over the retention window.
+/// Runs after the prune, so the window it averages is exactly what survives.
+pub const WRITE_AVG_MS_PROBE_SQL: &str = "
+UPDATE probes SET avg_latency_ms = (
+  SELECT avg(p.latency_ms) FROM probes p
+  WHERE p.slug = probes.slug AND p.checked_at >= ?1
+)
+WHERE checked_at = ?2";
 
 /// Builds one sweep's statements, in the order they must run.
 ///
@@ -172,7 +178,8 @@ pub(crate) fn build_batch(
     }));
 
     batch.push(json!({
-        "sql": READ_AVG_MS_SQL,
+        "sql": WRITE_AVG_MS_PROBE_SQL,
+        "params": [now.saturating_sub(PROBE_RETENTION_SECS), now],
     }));
 
     batch

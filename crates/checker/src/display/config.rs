@@ -7,3 +7,13 @@ pub struct TuiConfig {
     pub theme: Theme,
     pub tui_columns: Columns,
 }
+
+impl TuiConfig {
+    pub fn new(refresh_rate: Duration, theme: Theme, tui_columns: Columns) -> Self {
+        Self {
+            refresh_rate,
+            theme,
+            tui_columns,
+        }
+    }
+}
