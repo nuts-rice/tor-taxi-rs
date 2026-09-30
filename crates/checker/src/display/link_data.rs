@@ -84,7 +84,10 @@ fn render_status_cell(link: &Link) -> Cell<'static> {
 }
 
 fn render_avg_ms(link: &Link) -> Cell<'static> {
-    todo!()
+    match link.avg_latency_ms {
+        Some(ms) => Cell::from(format!("{ms} ms")),
+        None => Cell::from("-"),
+    }
 }
 
 fn render_slug_cell(link: &Link) -> Cell<'static> {
