@@ -20,7 +20,8 @@ use crate::status::StatusPolicy;
 use anyhow::Result;
 use clap::Parser;
 use crossterm::event;
-use ratatui::widgets::TableState;
+use ratatui::widgets::{ScrollbarState, TableState};
+use ratatui::DefaultTerminal;
 use shared::Link;
 
 #[derive(Debug, Parser)]
@@ -54,18 +55,68 @@ pub struct Args {
     pub status_policy: StatusPolicy,
 }
 
+const LINK_HEIGHT: usize = 4;
 struct TuiApp {
     link_data: Vec<Link>,
     config: TuiConfig,
     pub table_state: TableState,
+    scroll_state: ScrollbarState,
 }
 impl TuiApp {
     pub fn new(tui_config: TuiConfig, link_data: Vec<Link>) -> Self {
+        let link_data_len = link_data.clone().len();
         Self {
             link_data,
             config: tui_config,
             table_state: TableState::default(),
+            scroll_state: ScrollbarState::new((link_data_len - 1) * LINK_HEIGHT),
         }
+    }
+
+    pub const fn next_row(&mut self) {
+        let i = match self.table_state.selected() {
+            Some(i) => {
+                if i >= self.link_data.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.table_state.select(Some(i));
+        self.scroll_state = self.scroll_state.position(i * LINK_HEIGHT);
+    }
+    pub const fn previous_row(&mut self) {
+        let i = match self.table_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.link_data.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.table_state.select(Some(i));
+        self.scroll_state = self.scroll_state.position(i * LINK_HEIGHT);
+    }
+
+    pub fn next_column(&mut self) {
+        self.table_state.select_next_column();
+    }
+
+    pub fn previous_column(&mut self) {
+        self.table_state.select_previous_column();
+    }
+
+    fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        todo!()
+    }
+
+    fn selected_link(&self) -> Link {
+        let selected_idx = self.table_state.selected().unwrap_or(0);
+        self.link_data[selected_idx].clone()
     }
 }
 //Need to put get avg read here too

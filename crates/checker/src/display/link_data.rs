@@ -2,11 +2,13 @@ use anyhow::Context;
 use ratatui::Frame;
 
 use ratatui::layout::{Constraint, Rect};
+use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, BorderType, Borders, Cell, Row, Table};
-
 use std::fmt::{Debug, Display, Formatter};
 
-use crate::display::{config::TuiConfig, tui_app::TuiApp};
+use crate::display::config::TuiConfig;
+use crate::TuiApp;
+use crate::LINK_HEIGHT;
 pub use shared::{Link, LinkStatus};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -64,13 +66,20 @@ fn get_avg_ms(link: &Link) -> Option<f64> {
 }
 */
 
-pub fn render(f: &mut Frame<'_>, app: TuiApp, rect: Rect) {
-    //let config = &app.config;
-    todo!()
-}
-
 fn render_table_row(app: TuiApp, config: &TuiConfig) -> Row<'static> {
-    todo!()
+    let link = app.selected_link();
+    let mut cells: Vec<Cell<'static>> = Vec::new();
+    for column in config.tui_columns.columns() {
+        match column.typ {
+            ColumnType::Slug => cells.push(render_slug_cell(&link)),
+            ColumnType::Average => cells.push(render_avg_ms(&link)),
+            ColumnType::Status => cells.push(render_status_cell(&link)),
+        }
+    }
+    Row::new(cells)
+        .height(LINK_HEIGHT as u16)
+        .bottom_margin(0)
+        .style(Style::default().fg(Color::White).bg(Color::Black))
 }
 
 fn render_status_cell(link: &Link) -> Cell<'static> {
