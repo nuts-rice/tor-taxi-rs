@@ -15,13 +15,17 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::display::config::TuiConfig;
+use crate::display::link_data::render_table_row;
 use crate::probe::{Outcome, ProbePolicy};
 use crate::status::StatusPolicy;
 use anyhow::Result;
 use clap::Parser;
-use crossterm::event;
+use crossterm::event::{self, KeyCode, KeyModifiers};
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::{self, Color, Modifier, Style, Stylize};
+use ratatui::text::Text;
 use ratatui::widgets::{ScrollbarState, TableState};
-use ratatui::DefaultTerminal;
+use ratatui::{DefaultTerminal, Frame};
 use shared::Link;
 
 #[derive(Debug, Parser)]
@@ -111,7 +115,52 @@ impl TuiApp {
     }
 
     fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
-        todo!()
+        loop {
+            terminal.draw(|frame| self.render(frame))?;
+
+            if let event::Event::Key(key) = event::read()? {
+                match key.code {
+                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                    KeyCode::Down => self.next_row(),
+                    KeyCode::Up => self.previous_row(),
+                    KeyCode::Right => self.next_column(),
+                    KeyCode::Left => self.previous_column(),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn render(&mut self, frame: &mut Frame) {
+        let layout = Layout::vertical([Constraint::Min(5), Constraint::Length(4)]);
+        let rects = frame.area().layout_vec(&layout);
+        self.render_table(frame, rects[0]);
+    }
+
+    fn render_table(&mut self, frame: &mut Frame, area: Rect) {
+        let header_style = Style::default().fg(Color::White).bg(Color::Blue);
+        let bar = " █ ";
+        let rows = self
+            .link_data
+            .iter()
+            .map(|link| render_table_row(link, &self.config))
+            .collect::<Vec<_>>();
+        let table = ratatui::widgets::Table::new(
+            rows,
+            [
+                Constraint::Length(20),
+                Constraint::Min(10),
+                Constraint::Min(10),
+            ],
+        )
+        .highlight_symbol(Text::from(vec![
+            "".into(),
+            bar.into(),
+            bar.into(),
+            "".into(),
+        ]))
+        .bg(Color::Black);
+        frame.render_stateful_widget(table, area, &mut self.table_state);
     }
 
     fn selected_link(&self) -> Link {

@@ -66,8 +66,7 @@ fn get_avg_ms(link: &Link) -> Option<f64> {
 }
 */
 
-fn render_table_row(app: TuiApp, config: &TuiConfig) -> Row<'static> {
-    let link = app.selected_link();
+pub fn render_table_row(link: &Link, config: &TuiConfig) -> Row<'static> {
     let mut cells: Vec<Cell<'static>> = Vec::new();
     for column in config.tui_columns.columns() {
         match column.typ {
@@ -82,7 +81,7 @@ fn render_table_row(app: TuiApp, config: &TuiConfig) -> Row<'static> {
         .style(Style::default().fg(Color::White).bg(Color::Black))
 }
 
-fn render_status_cell(link: &Link) -> Cell<'static> {
+pub fn render_status_cell(link: &Link) -> Cell<'static> {
     let status = link.status;
     match status {
         Some(LinkStatus::Orange) => Cell::from("🟠"),
