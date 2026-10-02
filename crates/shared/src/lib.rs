@@ -24,11 +24,11 @@ use serde::{Deserialize, Serialize};
 /// history but stops rendering; see `0001_add_retired_at.sql`.
 pub const SELECT_LINKS_SQL: &str = "\
 SELECT slug, url, category, description, status, latency_ms, \
-       (strftime('%s', 'now') - last_checked_at) AS checked_ago_secs \
+       (strftime('%s', 'now') - last_checked_at) AS checked_ago_secs, \
     (SELECT CAST(round(p.avg_latency_ms) AS INTEGER) \
         FROM probes p \
     WHERE p.slug = links.slug \
-    ORDER BY p.checked_at DESC_LIMIT 1) AS avg_latency_ms \
+    ORDER BY p.checked_at DESC LIMIT 1) AS avg_latency_ms \
   FROM links \
  WHERE retired_at IS NULL \
  ORDER BY category, slug";

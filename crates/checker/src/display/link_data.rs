@@ -57,6 +57,16 @@ impl Columns {
         self.0.iter()
     }
 }
+
+impl Default for Columns {
+    fn default() -> Self {
+        Self(vec![
+            Column::new_shown(ColumnType::Slug),
+            Column::new_shown(ColumnType::Average),
+            Column::new_shown(ColumnType::Status),
+        ])
+    }
+}
 /*
 fn get_avg_ms(link: &Link) -> Option<f64> {
     let db =

@@ -20,3 +20,21 @@ pub struct StatusPolicy {
     #[arg(long, default_value_t = 3)]
     pub red_after: u32,
 }
+
+impl StatusPolicy {
+    /// The table above, for a caller that counts failures itself (the TUI).
+    /// `d1::RECORD_SQL` applies the same rule in SQL; keep the two in step.
+    pub fn classify(
+        &self,
+        latency: Option<Duration>,
+        consecutive_failures: u32,
+    ) -> shared::LinkStatus {
+        use shared::LinkStatus::{Orange, Red, White};
+        match latency {
+            Some(l) if l >= self.orange_after => Orange,
+            Some(_) => White,
+            None if consecutive_failures >= self.red_after => Red,
+            None => Orange,
+        }
+    }
+}

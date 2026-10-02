@@ -11,22 +11,27 @@ mod probe;
 mod proxy;
 mod status;
 
+use std::collections::HashMap;
+use std::io::IsTerminal;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
-use crate::display::config::TuiConfig;
-use crate::display::link_data::render_table_row;
-use crate::probe::{Outcome, ProbePolicy};
+use crate::display::config::{TableColors, TuiConfig, PALETTES};
+use crate::display::link_data::{render_table_row, Columns};
+use crate::links::LinkSet;
+use crate::probe::{Outcome, ProbePolicy, ProbeResult};
 use crate::status::StatusPolicy;
 use anyhow::Result;
 use clap::Parser;
-use crossterm::event::{self, KeyCode, KeyModifiers};
+use crossterm::event::{self, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{self, Color, Modifier, Style, Stylize};
+use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::Text;
-use ratatui::widgets::{ScrollbarState, TableState};
+use ratatui::widgets::{Paragraph, Row, ScrollbarState, TableState};
 use ratatui::{DefaultTerminal, Frame};
 use shared::Link;
+use tokio::sync::mpsc;
 
 #[derive(Debug, Parser)]
 #[command(about = "Probe onion links over Tor and write their status to D1")]
@@ -52,6 +57,16 @@ pub struct Args {
     #[arg(long)]
     pub dry_run: bool,
 
+    /// Never start the TUI, even on a terminal. It is already off whenever
+    /// stdout is not a TTY (systemd, docker without -t, a pipe) and under --once.
+    #[arg(long)]
+    pub no_tui: bool,
+
+    /// Where logs go while the TUI owns the terminal. Defaults to
+    /// `$TMPDIR/tor-taxi-checker.log`.
+    #[arg(long)]
+    pub log_file: Option<PathBuf>,
+
     #[command(flatten)]
     pub probe_policy: ProbePolicy,
 
@@ -59,25 +74,67 @@ pub struct Args {
     pub status_policy: StatusPolicy,
 }
 
+impl Args {
+    /// The TUI needs a terminal to draw on and a loop to watch. Without a TTY
+    /// it would write escape codes into journald; under --once there is no
+    /// second sweep, and the exit status is the result that matters.
+    fn wants_tui(&self) -> bool {
+        !self.no_tui && !self.once && std::io::stdout().is_terminal()
+    }
+}
+
+/// What the sweep task tells the TUI.
+enum SweepEvent {
+    Started,
+    Probed {
+        links: LinkSet,
+        results: Vec<ProbeResult>,
+    },
+    Failed(String),
+}
+
+/// Per-link history the TUI keeps across sweeps. D1 holds the real record;
+/// this is enough to colour a row without reading it back, and it works
+/// under --dry-run where there is no D1 at all.
+#[derive(Default)]
+struct Tally {
+    consecutive_failures: u32,
+    up_samples: u64,
+    up_latency_sum_ms: u64,
+}
+
 const LINK_HEIGHT: usize = 4;
 struct TuiApp {
     link_data: Vec<Link>,
     config: TuiConfig,
+    status_policy: StatusPolicy,
+    tallies: HashMap<String, Tally>,
+    colors: TableColors,
+    footer: String,
+    color_index: usize,
     pub table_state: TableState,
     scroll_state: ScrollbarState,
 }
 impl TuiApp {
-    pub fn new(tui_config: TuiConfig, link_data: Vec<Link>) -> Self {
-        let link_data_len = link_data.clone().len();
+    pub fn new(tui_config: TuiConfig, status_policy: StatusPolicy, link_data: Vec<Link>) -> Self {
+        let link_data_len = link_data.len();
         Self {
             link_data,
             config: tui_config,
+            status_policy,
+            tallies: HashMap::new(),
+            footer: "waiting for the first sweep…".into(),
             table_state: TableState::default(),
-            scroll_state: ScrollbarState::new((link_data_len - 1) * LINK_HEIGHT),
+            colors: TableColors::new(&PALETTES[0]),
+            color_index: 0,
+            scroll_state: ScrollbarState::new(link_data_len.saturating_sub(1) * LINK_HEIGHT),
         }
     }
 
-    pub const fn next_row(&mut self) {
+    pub fn next_row(&mut self) {
+        if self.link_data.is_empty() {
+            return;
+        }
         let i = match self.table_state.selected() {
             Some(i) => {
                 if i >= self.link_data.len() - 1 {
@@ -91,7 +148,10 @@ impl TuiApp {
         self.table_state.select(Some(i));
         self.scroll_state = self.scroll_state.position(i * LINK_HEIGHT);
     }
-    pub const fn previous_row(&mut self) {
+    pub fn previous_row(&mut self) {
+        if self.link_data.is_empty() {
+            return;
+        }
         let i = match self.table_state.selected() {
             Some(i) => {
                 if i == 0 {
@@ -114,17 +174,110 @@ impl TuiApp {
         self.table_state.select_previous_column();
     }
 
-    fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+    pub const fn next_color(&mut self) {
+        self.color_index = (self.color_index + 1) % PALETTES.len();
+    }
+
+    pub const fn previous_color(&mut self) {
+        let count = PALETTES.len();
+        self.color_index = (self.color_index + count - 1) % count;
+    }
+
+    pub const fn set_colors(&mut self) {
+        self.colors = TableColors::new(&PALETTES[self.color_index]);
+    }
+
+    /// Folds one sweep into the tallies and rebuilds the rows from links.toml
+    /// order, so a link added mid-run shows up on the next sweep.
+    fn apply_sweep(&mut self, links: &LinkSet, results: &[ProbeResult]) {
+        let by_slug: HashMap<&str, &ProbeResult> =
+            results.iter().map(|r| (r.slug.as_str(), r)).collect();
+        let mut up = 0;
+
+        self.link_data = links
+            .iter()
+            .map(|(slug, entry)| {
+                let tally = self.tallies.entry(slug.clone()).or_default();
+                let result = by_slug.get(slug.as_str());
+                let latency = result.and_then(|r| match r.outcome {
+                    Outcome::Reachable { latency } => Some(latency),
+                    Outcome::Unreachable { .. } => None,
+                });
+
+                match (result, latency) {
+                    (Some(_), Some(l)) => {
+                        up += 1;
+                        tally.consecutive_failures = 0;
+                        tally.up_samples += 1;
+                        tally.up_latency_sum_ms += l.as_millis() as u64;
+                    }
+                    (Some(_), None) => tally.consecutive_failures += 1,
+                    (None, _) => {}
+                }
+
+                Link {
+                    slug: slug.clone(),
+                    url: entry.url.clone(),
+                    category: entry.category,
+                    description: entry.description.clone(),
+                    status: result.map(|_| {
+                        self.status_policy
+                            .classify(latency, tally.consecutive_failures)
+                    }),
+                    latency_ms: latency.map(|l| l.as_millis() as u64),
+                    checked_ago_secs: None,
+                    avg_latency_ms: tally.up_latency_sum_ms.checked_div(tally.up_samples),
+                }
+            })
+            .collect();
+
+        self.scroll_state = self
+            .scroll_state
+            .content_length(self.link_data.len().saturating_sub(1) * LINK_HEIGHT);
+        if self.table_state.selected().is_none() && !self.link_data.is_empty() {
+            self.table_state.select(Some(0));
+        }
+        self.footer = format!("{up} up / {} down", results.len() - up);
+    }
+
+    fn handle(&mut self, event: SweepEvent) {
+        match event {
+            SweepEvent::Started => self.footer = format!("{} · sweeping…", self.footer),
+            SweepEvent::Probed { links, results } => self.apply_sweep(&links, &results),
+            SweepEvent::Failed(e) => self.footer = format!("last sweep failed: {e}"),
+        }
+    }
+
+    fn run(
+        mut self,
+        terminal: &mut DefaultTerminal,
+        mut events: mpsc::UnboundedReceiver<SweepEvent>,
+    ) -> Result<()> {
         loop {
+            while let Ok(ev) = events.try_recv() {
+                self.handle(ev);
+            }
             terminal.draw(|frame| self.render(frame))?;
 
+            // Poll rather than block, so a finished sweep redraws without
+            // waiting for a keypress.
+            if !event::poll(self.config.refresh_rate)? {
+                continue;
+            }
             if let event::Event::Key(key) = event::read()? {
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                    KeyCode::Down => self.next_row(),
-                    KeyCode::Up => self.previous_row(),
-                    KeyCode::Right => self.next_column(),
-                    KeyCode::Left => self.previous_column(),
+                    // Raw mode swallows SIGINT; Ctrl-C arrives as a key.
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        return Ok(())
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => self.next_row(),
+                    KeyCode::Up | KeyCode::Char('k') => self.previous_row(),
+                    KeyCode::Right | KeyCode::Char('l') => self.next_column(),
+                    KeyCode::Left | KeyCode::Char('h') => self.previous_column(),
                     _ => {}
                 }
             }
@@ -132,13 +285,15 @@ impl TuiApp {
     }
 
     fn render(&mut self, frame: &mut Frame) {
-        let layout = Layout::vertical([Constraint::Min(5), Constraint::Length(4)]);
+        let layout = Layout::vertical([Constraint::Min(5), Constraint::Length(1)]);
         let rects = frame.area().layout_vec(&layout);
         self.render_table(frame, rects[0]);
+        self.render_footer(frame, rects[1]);
     }
 
     fn render_table(&mut self, frame: &mut Frame, area: Rect) {
         let header_style = Style::default().fg(Color::White).bg(Color::Blue);
+        let header = Row::new(["slug", "avg", "status"]).style(header_style);
         let bar = " █ ";
         let rows = self
             .link_data
@@ -153,34 +308,37 @@ impl TuiApp {
                 Constraint::Min(10),
             ],
         )
+        .header(header)
         .highlight_symbol(Text::from(vec![
             "".into(),
             bar.into(),
             bar.into(),
             "".into(),
         ]))
-        .bg(Color::Black);
+        .style(
+            Style::new()
+                .fg(self.colors.row_fg)
+                .bg(self.colors.normal_row_color),
+        );
         frame.render_stateful_widget(table, area, &mut self.table_state);
     }
 
-    fn selected_link(&self) -> Link {
-        let selected_idx = self.table_state.selected().unwrap_or(0);
-        self.link_data[selected_idx].clone()
+    fn render_footer(&self, frame: &mut Frame, area: Rect) {
+        let text = format!(" {} · ↑↓ move · q quit", self.footer);
+        frame.render_widget(Paragraph::new(text).fg(Color::Gray), area);
+    }
+
+    fn selected_link(&self) -> Option<&Link> {
+        self.link_data.get(self.table_state.selected()?)
     }
 }
-//Need to put get avg read here too
-//avg read is avg_latency_ms in d1
-//then get pass to tui somehow?
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "tor_taxi_checker=info".into()),
-        )
-        .init();
-
     let args = Args::parse();
+    let tui = args.wants_tui();
+    init_tracing(&args, tui)?;
+
     let d1 = if args.dry_run {
         None
     } else {
@@ -193,10 +351,81 @@ async fn main() -> Result<()> {
         Err(e) => tracing::warn!(error = ?e, "could not verify circuit isolation"),
     }
 
+    if !tui {
+        return sweep_loop(&args, d1.as_ref(), None).await;
+    }
+
+    // The sweeps run as a task; the TUI owns the terminal on a blocking
+    // thread, because crossterm's event::poll would otherwise stall the
+    // runtime the probes need.
+    let (tx, rx) = mpsc::unbounded_channel();
+    let config = TuiConfig::new(
+        Duration::from_millis(250),
+        color_eyre::config::Theme::default(),
+        Columns::default(),
+    );
+    let app = TuiApp::new(config, args.status_policy, Vec::new());
+    let ui = tokio::task::spawn_blocking(move || ratatui::run(|terminal| app.run(terminal, rx)));
+
+    // Quitting the TUI ends the process; dropping the sweep mid-flight is fine,
+    // since an unflushed sweep simply never reaches D1.
+    tokio::select! {
+        ui = ui => ui?,
+        swept = sweep_loop(&args, d1.as_ref(), Some(tx)) => swept,
+    }
+}
+
+/// Logs to stdout headless. Under the TUI, to a file instead: anything written
+/// to the terminal would be drawn over the table.
+fn init_tracing(args: &Args, tui: bool) -> Result<()> {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "tor_taxi_checker=info".into());
+    let builder = tracing_subscriber::fmt().with_env_filter(filter);
+
+    if tui {
+        let path = args
+            .log_file
+            .clone()
+            .unwrap_or_else(|| std::env::temp_dir().join("tor-taxi-checker.log"));
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        builder
+            .with_ansi(false)
+            .with_writer(Mutex::new(file))
+            .init();
+        eprintln!("logging to {}", path.display());
+    } else {
+        builder.init();
+    }
+    Ok(())
+}
+
+async fn sweep_loop(
+    args: &Args,
+    d1: Option<&d1::D1Client>,
+    ui: Option<mpsc::UnboundedSender<SweepEvent>>,
+) -> Result<()> {
+    // A send only fails once the TUI has gone, and then nobody is listening.
+    let notify = |ev| {
+        if let Some(ui) = &ui {
+            let _ = ui.send(ev);
+        }
+    };
+
     loop {
-        let swept = sweep(&args, d1.as_ref()).await;
+        notify(SweepEvent::Started);
+        let swept = sweep(args, d1, |links, results| {
+            notify(SweepEvent::Probed {
+                links: links.clone(),
+                results: results.to_vec(),
+            })
+        })
+        .await;
         if let Err(e) = &swept {
             tracing::error!(error = ?e, "sweep failed");
+            notify(SweepEvent::Failed(format!("{e:#}")));
         }
 
         // Propagated rather than discarded: deploy/pi/entrypoint.sh treats the
@@ -208,11 +437,17 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn sweep(args: &Args, d1: Option<&d1::D1Client>) -> Result<()> {
+/// `on_probed` sees the results before the D1 write, so the TUI still shows
+/// what the network said when the write itself fails.
+async fn sweep(
+    args: &Args,
+    d1: Option<&d1::D1Client>,
+    on_probed: impl FnOnce(&LinkSet, &[ProbeResult]),
+) -> Result<()> {
     // Re-read every sweep so adding a link does not need a restart.
     let links = links::load(&args.links)?;
     tracing::info!(count = links.len(), "🔍 starting sweep");
-    let now = std::time::Instant::now();
+    let now = Instant::now();
 
     let results = probe::probe_all(&links, &args.socks_addr, &args.probe_policy).await?;
 
@@ -228,6 +463,7 @@ async fn sweep(args: &Args, d1: Option<&d1::D1Client>) -> Result<()> {
     tracing::info!(up, down = results.len() - up, "sweep complete");
     let sweep_duration = now.elapsed();
     tracing::info!("✅ Sweep complete in {:2} s", sweep_duration.as_secs_f64());
+    on_probed(&links, &results);
 
     match d1 {
         Some(d1) => d1.flush(&links, &results, &args.status_policy).await,
