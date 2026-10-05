@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 /// `retired_at IS NULL` is the delisting filter. A retired row keeps its probe
 /// history but stops rendering; see `0001_add_retired_at.sql`.
 pub const SELECT_LINKS_SQL: &str = "\
-SELECT slug, url, category, description, status, latency_ms, \
+SELECT slug, url, category, description, status, latency_ms, other_urls \
        (strftime('%s', 'now') - last_checked_at) AS checked_ago_secs, \
     (SELECT CAST(round(p.avg_latency_ms) AS INTEGER) \
         FROM probes p \
@@ -115,6 +115,7 @@ impl LinkStatus {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LinkEntry {
     pub url: String,
+    pub other_urls: Option<Vec<String>>,
     pub category: LinkCategory,
     #[serde(default)]
     pub description: String,
@@ -131,6 +132,8 @@ pub struct Link {
     pub url: String,
     pub category: LinkCategory,
     pub description: String,
+    //comma-seperated list of other urls for same service, ... mirrors etc
+    pub other_urls: Option<Vec<String>>,
     /// `None` until the checker has probed it at least once. Not the same as
     /// down -- we simply do not know yet.
     pub status: Option<LinkStatus>,

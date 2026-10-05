@@ -72,16 +72,37 @@ pub async fn probe_all(
             let identity = random_identity();
             let client = build_client(socks_addr, &identity, policy.timeout, false)
                 .with_context(|| format!("building the probe client for `{slug}`"))?;
-            Ok(probe_one(&client, slug, &link.url).await)
+            Ok(probe_one(&client, slug, &link.url, &link.other_urls).await)
         })
         .buffer_unordered(policy.concurrency)
         .try_collect()
         .await
 }
 
-async fn probe_one(client: &reqwest::Client, slug: &str, url: &str) -> ProbeResult {
+async fn probe_one(
+    client: &reqwest::Client,
+    slug: &str,
+    url: &str,
+    other_urls: &Option<Vec<String>>,
+) -> ProbeResult {
     let started = Instant::now();
     let response = client.get(url).send().await;
+    if response.is_err() {
+        if let Some(other_urls) = other_urls {
+            for other_url in other_urls {
+                let other_response = client.get(other_url).send().await;
+                if other_response.is_ok() {
+                    tracing::info!(slug, url = %other_url, "alternative url is reachable");
+                    return ProbeResult {
+                        slug: slug.to_string(),
+                        outcome: Outcome::Reachable {
+                            latency: started.elapsed(),
+                        },
+                    };
+                }
+            }
+        }
+    }
     let elapsed = started.elapsed();
 
     let outcome = match response {
