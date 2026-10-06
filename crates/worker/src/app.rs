@@ -181,6 +181,8 @@ fn HomePage() -> impl IntoView {
         <p> "Intended for research purposes etc etc..." </p>
         <p> "If you believe a link should be added or removed please contact at:" </p>
         <p> "0x0fSoftworks@protonmail.com" </p>
+
+        <h4> Various important links : <a href="./canary.txt" target="_blank">Canary</a> |  <a href="./pgp.txt" target="_blank"> PGP</a> | <a> Mirror</a> </h4>
             </Suspense>
         </div>
     }

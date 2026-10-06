@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 /// `retired_at IS NULL` is the delisting filter. A retired row keeps its probe
 /// history but stops rendering; see `0001_add_retired_at.sql`.
 pub const SELECT_LINKS_SQL: &str = "\
-SELECT slug, url, category, description, status, latency_ms, other_urls \
+SELECT slug, url, category, other_urls, description, status, latency_ms, \
        (strftime('%s', 'now') - last_checked_at) AS checked_ago_secs, \
     (SELECT CAST(round(p.avg_latency_ms) AS INTEGER) \
         FROM probes p \

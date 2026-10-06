@@ -218,6 +218,7 @@ impl TuiApp {
                 Link {
                     slug: slug.clone(),
                     url: entry.url.clone(),
+                    other_urls: entry.other_urls.clone(),
                     category: entry.category,
                     description: entry.description.clone(),
                     status: result.map(|_| {
@@ -536,6 +537,7 @@ mod test {
                     slug.to_string(),
                     LinkEntry {
                         url: url.to_string(),
+                        other_urls: None, 
                         category: LinkCategory::Info,
                         description: "desc".into(),
                         expected_content: None,
