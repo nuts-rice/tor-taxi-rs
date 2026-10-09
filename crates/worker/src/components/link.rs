@@ -12,32 +12,67 @@ fn humanize(secs: i64) -> String {
 }
 
 /// Purely presentational -- the whole page is fetched once by `HomePage`.
+/// Takes the link by value and moves its strings into the view, so a row costs
+/// no copies of its own.
 #[component]
 pub fn ShowLink(link: Link) -> impl IntoView {
-    let (class, label) = match link.status {
+    let Link {
+        slug,
+        url,
+        description,
+        other_urls,
+        status,
+        latency_ms,
+        avg_latency_ms,
+        checked_ago_secs,
+        ..
+    } = link;
+
+    let (class, label) = match status {
         Some(s) => (s.css_class(), s.label()),
         None => ("status unknown", "not yet checked"),
     };
 
-    let freshness = link.checked_ago_secs.map(humanize);
-    let latency = link.latency_ms.map(|ms| format!("{ms} ms"));
+    let latency = latency_ms.map(|ms| match avg_latency_ms {
+        Some(avg) => format!(" · {ms} ms (avg {avg})"),
+        None => format!(" · {ms} ms"),
+    });
+    // Freshness is the product: a stale dot is worth less than no dot, so say
+    // out loud how old this reading is.
+    let freshness = checked_ago_secs.map(|s| format!(" · checked {}", humanize(s)));
+
+    let mirrors = other_urls.filter(|urls| !urls.is_empty()).map(|urls| {
+        view! {
+            <details class="mirrors">
+                <summary>{format!("{} mirror{}", urls.len(), if urls.len() == 1 { "" } else { "s" })}</summary>
+                <ul>
+                    {urls
+                        .into_iter()
+                        .map(|u| {
+                            let href = u.clone();
+                            view! { <li><a href=href rel="noopener noreferrer">{u}</a></li> }
+                        })
+                        .collect_view()}
+                </ul>
+            </details>
+        }
+        .into_any()
+    });
 
     view! {
         <li class="link">
             <span class=class title=label></span>
             <div class="body">
-                <a href=link.url.clone() rel="noopener noreferrer">{link.slug.clone()}</a>
-                <p class="description">{link.description.clone()}</p>
-                <p class="meta">
-                    {label}
-                    {latency.map(|l| format!(" · {l}"))}
-                    // Freshness is the product: a stale dot is worth less than
-                    // no dot, so say out loud how old this reading is.
-                    {freshness.map(|f| format!(" · checked {f}"))}
-                </p>
+                <a class="name" href=url.clone() title=url rel="noopener noreferrer">{slug}</a>
+                <p class="description">{description}</p>
+                <p class="meta">{label}{latency}{freshness}</p>
+                {mirrors}
             </div>
         </li>
     }
+    // Erased so the page's view type doesn't nest every row's full shape --
+    // without it the release build overflows rustc's query depth limit.
+    .into_any()
 }
 
 #[cfg(test)]

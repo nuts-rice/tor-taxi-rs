@@ -1,14 +1,15 @@
 use leptos::prelude::*;
 #[cfg(feature = "ssr")]
 use leptos_meta::MetaTags;
-use leptos_meta::{provide_meta_context, Stylesheet};
+use leptos_meta::{provide_meta_context, Meta, Stylesheet, Title};
 use leptos_router::{
     components::{Route, Router, Routes},
     StaticSegment,
 };
 
 use crate::api::get_links;
-use crate::components::link::ShowLink;
+use crate::components::chrome::{Footer, Legend, Masthead};
+use crate::components::directory::Directory;
 
 #[cfg(feature = "ssr")]
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -36,6 +37,9 @@ pub fn App() -> impl IntoView {
         // injects a stylesheet into the document <head>
         // id=leptos means cargo-leptos will hot-reload this stylesheet
         <Stylesheet id="leptos" href="/pkg/tor-taxi-rs-worker.css"/>
+        <Title text="tor-rs.cab"/>
+        <Meta name="description" content="A status-checked directory of onion services."/>
+        <Meta name="color-scheme" content="dark"/>
 
         // content for this welcome page
         <Router>
@@ -56,134 +60,20 @@ fn HomePage() -> impl IntoView {
     let links = Resource::new_blocking(|| (), |_| get_links());
     view! {
         <div class="container">
-            <h1>"tor-rs.cab - A link resource for darknet"</h1>
-            <p>"Links with a red dot are experiencing downtime"</p>
-            <p>"Links with an orange dot are experiencing DDoS attack or maintenance"</p>
-            <p> "Inspired by original tor.taxi. Frontend in Rust using Leptos framework." </p>
-            <p> "Checker probe is Rust as well.  🦀"
-            <h4> "Onion routing for this site should be working in Tor Browser."</h4>
-
-
-            </p>
-
+            <Masthead/>
+            <Legend/>
             <Suspense fallback=|| view! { <p class="loading">"Loading directory…"</p> }>
                 {move || Suspend::new(async move {
                     match links.await {
-                        Ok(links) => {
-                            view! {
-                                <h2> "News" </h2>
-                                <ul class="links">
-                                    {links
-                                        .clone()
-                                        .into_iter()
-                                        .filter(|link| link.category.label() == "News")
-                                        .map(|link| view! { <ShowLink link=link  /> })
-                                        .collect_view()}
-                                </ul>
-                                <h2> "Info" </h2>
-                                <ul class="links">
-                                    {links
-                                        .clone()
-                                        .into_iter()
-                                        .filter(|link| link.category.label() == "Info")
-                                        .map(|link| view! { <ShowLink link=link  /> })
-                                        .collect_view()}
-                                </ul>
-
-                                <h2> "Forum" </h2>
-                                <ul class="links">
-                                    {links
-                                        .clone()
-                                        .into_iter()
-                                        .filter(|link| link.category.label() == "Forum")
-                                        .map(|link| view! { <ShowLink link=link  /> })
-                                        .collect_view()}
-                                </ul>
-                                <h2> "Image Upload" </h2>
-                                <ul class="links">
-                                    {links
-                                        .clone()
-                                        .into_iter()
-                                        .filter(|link| link.category.label() == "Image Upload")
-                                        .map(|link| view! { <ShowLink link=link  /> })
-                                        .collect_view()}
-                                </ul>
-                                <h2> "Search" </h2>
-                                <ul class="links">
-                                    {links
-                                        .clone()
-                                        .into_iter()
-                                        .filter(|link| link.category.label() == "Search")
-                                        .map(|link| view! { <ShowLink link=link  /> })
-                                        .collect_view()}
-                                </ul>
-                                <h2> "Market" </h2>
-                                <ul class="links">
-                                    {links
-                                        .clone()
-                                        .into_iter()
-                                        .filter(|link| link.category.label() == "Market")
-                                        .map(|link| view! { <ShowLink link=link  /> })
-                                        .collect_view()}
-                                </ul>
-                                <h2> "Escrow" </h2>
-                                <ul class="links">
-                                    {links
-                                        .clone()
-                                        .into_iter()
-                                        .filter(|link| link.category.label() == "Escrow")
-                                        .map(|link| view! { <ShowLink link=link  /> })
-                                        .collect_view()}
-                                </ul>
-
-                                <h2> "Exchange" </h2>
-                                <ul class="links">
-                                    {links
-                                        .clone()
-                                        .into_iter()
-                                        .filter(|link| link.category.label() == "Exchange")
-                                        .map(|link| view! { <ShowLink link=link  /> })
-                                        .collect_view()}
-                                </ul>
-                                <h2> "Service" </h2>
-                                <ul class="links">
-                                    {links
-                                        .clone()
-                                        .into_iter()
-                                        .filter(|link| link.category.label() == "Service")
-                                        .map(|link| view! { <ShowLink link=link  /> })
-                                        .collect_view()}
-                                </ul>
-                                <h2> "Email" </h2>
-                                <ul class="links">
-                                    {links
-                                        .clone()
-                                        .into_iter()
-                                        .filter(|link| link.category.label() == "Email")
-                                        .map(|link| view! { <ShowLink link=link  /> })
-                                        .collect_view()}
-                                </ul>
-
-
-
-
-
-
-                            }
-                                .into_any()
-                        }
+                        Ok(links) => view! { <Directory links/> }.into_any(),
                         Err(e) => {
                             view! { <p class="error">{format!("Could not load links: {e}")}</p> }
                                 .into_any()
                         }
                     }
                 })}
-        <p> "Intended for research purposes etc etc..." </p>
-        <p> "If you believe a link should be added or removed please contact at:" </p>
-        <p> "0x0fSoftworks@protonmail.com" </p>
-
-        <h4> Various important links : <a href="./canary.txt" target="_blank">Canary</a> |  <a href="./pgp.txt" target="_blank"> PGP</a> | <a> Mirror</a> </h4>
             </Suspense>
+            <Footer/>
         </div>
     }
 }

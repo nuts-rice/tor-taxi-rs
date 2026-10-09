@@ -29,12 +29,20 @@
   --fg: #d8d8d8;
   --muted: #7a7a7a;
   --rule: #262626;
+  --raised: #151515;
   --red: #cc3b3b;
   --orange: #d98324;
   --white: #e8e8e8;
   --unknown: #4a4a4a;
+  /* Taxi yellow. Chrome only -- prompt, cursor, headings, focus -- never a
+     dot, so it cannot be read as a status. */
+  --accent: #f2c230;
+  color-scheme: dark;
 }
 
+/* Dark only, on purpose: Tor Browser's fingerprinting resistance reports
+   prefers-color-scheme: light to every site, so a light variant would be
+   what most of this audience actually got. */
 body {
   margin: 0;
   background: var(--bg);
@@ -42,22 +50,96 @@ body {
   font: 15px/1.55 "Hack", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-.container { max-width: 46rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
-.container h1 { font-size: 1.35rem; margin: 0 0 1rem; }
-.container > p { color: var(--muted); margin: 0.2rem 0; }
+::selection { background: var(--accent); color: var(--bg); }
+:focus-visible { outline: 1px dashed var(--accent); outline-offset: 3px; }
 
-.links { list-style: none; padding: 0; margin: 2rem 0 0; }
+.container { max-width: 46rem; margin: 0 auto; padding: 2.5rem 1rem 4rem; }
+
+/* --- masthead -------------------------------------------------------- */
+
+.masthead h1 { font-size: 1.6rem; margin: 0; letter-spacing: -0.01em; }
+.prompt { color: var(--accent); }
+.cursor {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  margin-left: 0.15em;
+  vertical-align: -0.15em;
+  background: var(--accent);
+  animation: blink 1.1s steps(1) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+
+.tagline { margin: 0.35rem 0 0; }
+.aside { margin: 0.75rem 0 0; color: var(--muted); font-size: 0.85rem; }
+
+/* Editorial warnings. Accent border rather than red, since red on this page
+   means a dot: this is us talking, not the probe. */
+.notice {
+  margin: 1rem 0 0;
+  padding: 0.5rem 0.8rem;
+  border-left: 3px solid var(--accent);
+  background: var(--raised);
+}
+.notice strong { color: var(--accent); }
+
+/* --- legend + tally -------------------------------------------------- */
+
+.legend, .tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.25rem;
+  align-items: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.legend { margin: 1.5rem 0 0; padding: 0.6rem 0.8rem; border: 1px solid var(--rule); }
+.legend div { display: flex; align-items: center; gap: 0.5rem; }
+.legend dt, .legend dd { margin: 0; }
+.legend .status, .tally .status { margin: 0; }
+
+.tally { margin: 1.25rem 0 0; gap: 0.35rem 1rem; }
+.tally > span { display: inline-flex; align-items: center; gap: 0.45rem; white-space: nowrap; }
+
+/* --- category nav ---------------------------------------------------- */
+
+.toc {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0;
+  margin: 0.9rem 0 0;
+  font-size: 0.8rem;
+}
+.toc li { border: 1px solid var(--rule); padding: 0.1rem 0.5rem; }
+.toc a { color: var(--fg); text-decoration: none; }
+.toc li:hover { border-color: var(--accent); }
+
+.count { margin-left: 0.4rem; color: var(--muted); font-size: 0.75rem; font-weight: 400; }
+
+/* --- sections -------------------------------------------------------- */
+
+section { margin-top: 2.5rem; scroll-margin-top: 1rem; }
+section h2 { font-size: 1rem; margin: 0 0 0.5rem; }
+.hash { color: var(--accent); }
+
+.links { list-style: none; padding: 0; margin: 0; }
 
 .link {
   display: flex;
   gap: 0.85rem;
-  padding: 0.9rem 0;
+  padding: 0.8rem 0.5rem;
+  margin: 0 -0.5rem;
   border-top: 1px solid var(--rule);
 }
+.link:hover { background: var(--raised); }
 
 /* The dot is the whole product. Give it a fixed box so rows stay aligned
    whether or not a link has been probed yet. */
 .status {
+  display: inline-block;
   flex: 0 0 auto;
   width: 0.7rem;
   height: 0.7rem;
@@ -73,18 +155,32 @@ body {
    know" cannot be mistaken for "we checked and it's fine". */
 .status.unknown { background: transparent; box-shadow: inset 0 0 0 1px var(--unknown); }
 
-.body { min-width: 0; }
+.body { min-width: 0; overflow-wrap: anywhere; }
 .link a { color: var(--fg); text-decoration: none; border-bottom: 1px solid var(--rule); }
-.link a:hover { border-bottom-color: var(--fg); }
+.link a:hover { border-bottom-color: var(--accent); }
+.name { font-weight: 700; }
 
-.category {
-  margin-left: 0.6rem;
-  font-size: 0.75rem;
-  color: var(--muted);
-  text-transform: lowercase;
-}
-
-.description { margin: 0.3rem 0 0; }
+.description { margin: 0.25rem 0 0; }
 .meta { margin: 0.15rem 0 0; font-size: 0.8rem; color: var(--muted); }
-.loading, .error { color: var(--muted); }
+
+.mirrors { margin-top: 0.35rem; font-size: 0.8rem; }
+.mirrors summary { cursor: pointer; color: var(--muted); }
+.mirrors summary:hover { color: var(--fg); }
+.mirrors ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
+
+.loading { color: var(--muted); }
 .error { color: var(--red); }
+
+/* --- footer ---------------------------------------------------------- */
+
+.colophon {
+  margin-top: 3.5rem;
+  padding-top: 1rem;
+  border-top: 1px dashed var(--rule);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.colophon p { margin: 0.25rem 0; }
+.contact { color: var(--fg); user-select: all; }
+.verify a { color: var(--fg); }
+.verify a:hover { color: var(--accent); }
