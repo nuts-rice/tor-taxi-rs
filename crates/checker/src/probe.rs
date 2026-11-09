@@ -129,6 +129,6 @@ async fn probe_one(
 }
 
 // Downgrade to Orange?
-async fn assert_content_match(slug: &str, url: &str) -> bool {
+async fn assert_content_match(_slug: &str, _url: &str) -> bool {
     true
 }

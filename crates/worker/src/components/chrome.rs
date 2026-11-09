@@ -12,16 +12,18 @@ pub fn Masthead() -> impl IntoView {
                 "tor-rs.cab"
                 <span class="cursor" aria-hidden="true"></span>
             </h1>
-            <p class="tagline">"a link resource for the darknet, kept honest by a probe over Tor"</p>
+            <p class="tagline">"a link resource for the darknet"</p>
             <p class="aside">
                 "Inspired by the original tor.taxi. Frontend in Rust on Leptos, "
                 "checker in Rust on a Pi. 🦀 Onion routing for this site should "
                 "work in Tor Browser."
             </p>
             <p class="notice" role="note">
-                <strong>"heads up: "</strong>
+                <strong>"Be aware: "</strong>
                 "Dark Matter Market is suspected of an exit scam."
             </p>
+
+
         </header>
     }
 }
@@ -53,6 +55,14 @@ pub fn Footer() -> impl IntoView {
                 " · "
                 <a href="/pgp.txt" target="_blank" rel="noopener noreferrer">"pgp"</a>
             </p>
+            <p> "Other link resources: " </p>
+            <p>
+                <a href="https://tor.taxi/" target="_balnk" rel="noopener noreferrer"> "tor taxi and inspo for this project" </a>         
+                " · "
+                <a href="https://daunt.link/" target="_blank" rel="noopener noreferrer"> "daunt " </a>
+                " · "
+                <a href="https://tor.watch/" target="_balnk" rel="noopener noreferrer"> "tor watch" </a>                
+        </p>
         </footer>
     }
 }

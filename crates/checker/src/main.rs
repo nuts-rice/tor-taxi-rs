@@ -499,6 +499,7 @@ mod test {
         include_str!("../../worker/migrations/0001_add_retired_at.sql"),
         include_str!("../../worker/migrations/0002_add_probes.sql"),
         include_str!("../../worker/migrations/0003_add_avg_to_probes.sql"),
+        include_str!("../../worker/migrations/0004_add_urls_to_links.sql"),
     ];
 
     const POLICY: StatusPolicy = StatusPolicy {
@@ -562,7 +563,12 @@ mod test {
             })
             .collect();
 
-        for stmt in build_batch(&links, &results, &POLICY, now) {
+        replay(conn, &links, &results, now);
+    }
+
+    /// Executes exactly the statements `build_batch` produced, in order.
+    fn replay(conn: &Connection, links: &LinkSet, results: &[ProbeResult], now: u64) {
+        for stmt in build_batch(links, results, &POLICY, now) {
             let sql = stmt["sql"].as_str().unwrap();
             let bound: Vec<SqlValue> = stmt["params"]
                 .as_array()
@@ -609,12 +615,57 @@ mod test {
         }
     }
 
+    /// Mirrors go links.toml -> UPSERT_SQL -> the column -> SELECT_LINKS_SQL ->
+    /// `Link`, and dropping them from links.toml clears them.
+    #[test]
+    fn other_urls_reach_the_worker_and_can_be_removed() {
+        let conn = migrated();
+        let mirrors = vec!["http://m.onion/".to_string()];
+        let set = |other_urls: Option<Vec<String>>| -> LinkSet {
+            [(
+                "a".to_string(),
+                LinkEntry {
+                    url: "http://a.onion/".into(),
+                    other_urls,
+                    category: LinkCategory::Info,
+                    description: "desc".into(),
+                    expected_content: None,
+                },
+            )]
+            .into()
+        };
+        let up = [ProbeResult {
+            slug: "a".into(),
+            outcome: Outcome::Reachable { latency: Duration::from_millis(100) },
+        }];
+        // What D1 hands the Worker for the column, decoded the way the Worker
+        // decodes it.
+        let read = |conn: &Connection| -> Option<Vec<String>> {
+            let cell: Option<String> = conn
+                .query_row(SELECT_LINKS_SQL, [], |r| r.get("other_urls"))
+                .unwrap();
+            let row: shared::Link = serde_json::from_value(serde_json::json!({
+                "slug": "a", "url": "", "category": "Info", "description": "",
+                "other_urls": cell, "status": null, "latency_ms": null,
+                "checked_ago_secs": null, "avg_latency_ms": null,
+            }))
+            .unwrap();
+            row.other_urls
+        };
+
+        replay(&conn, &set(Some(mirrors.clone())), &up, 1_000);
+        assert_eq!(read(&conn), Some(mirrors));
+
+        replay(&conn, &set(None), &up, 2_000);
+        assert_eq!(read(&conn), None, "a mirror removed from links.toml must stop rendering");
+    }
+
     #[test]
     fn schema_rejects_an_unknown_category() {
         let conn = migrated();
         let err = conn.execute(
             UPSERT_SQL,
-            params!["new", "http://x.onion/", "NewCategory", ""],
+            params!["new", "http://x.onion/", "NewCategory", "", None::<String>],
         );
         assert!(
             err.is_err(),
@@ -867,7 +918,7 @@ mod test {
         assert_eq!(live, 1, "a live row was deleted to free its url");
 
         assert!(
-            conn.execute(UPSERT_SQL, params!["b", "http://shared.onion/", "Info", ""])
+            conn.execute(UPSERT_SQL, params!["b", "http://shared.onion/", "Info", "", None::<String>])
                 .is_err(),
             "a duplicate url must fail rather than silently rewrite the table"
         );

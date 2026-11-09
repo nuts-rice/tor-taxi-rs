@@ -32,11 +32,16 @@ pub const RELEASE_URL_SQL: &str =
 /// Clearing `retired_at` is the un-delist path: a link that comes back keeps
 /// the history it had before it was retired, rather than starting over at
 /// consecutive_failures = 0 and claiming a clean record it has not earned.
+///
+/// `?5` is `other_urls` as [`shared::other_urls_to_sql`] encodes it. Overwritten
+/// like every other editorial column, so deleting a mirror from links.toml
+/// clears it here rather than leaving it to render forever.
 pub const UPSERT_SQL: &str = "\
-INSERT INTO links (slug, url, category, description) VALUES (?1, ?2, ?3, ?4) \
+INSERT INTO links (slug, url, category, description, other_urls) VALUES (?1, ?2, ?3, ?4, ?5) \
 ON CONFLICT(slug) DO UPDATE SET \
   url = excluded.url, category = excluded.category, \
-  description = excluded.description, retired_at = NULL";
+  description = excluded.description, other_urls = excluded.other_urls, \
+  retired_at = NULL";
 
 /// Retires every row whose slug is no longer in `links.toml`.
 ///
@@ -153,7 +158,13 @@ pub(crate) fn build_batch(
         }));
         batch.push(json!({
             "sql": UPSERT_SQL,
-            "params": [result.slug, link.url, link.category, link.description],
+            "params": [
+                result.slug,
+                link.url,
+                link.category,
+                link.description,
+                shared::other_urls_to_sql(link.other_urls.as_deref()),
+            ],
         }));
         batch.push(json!({
             "sql": RECORD_SQL.as_str(),

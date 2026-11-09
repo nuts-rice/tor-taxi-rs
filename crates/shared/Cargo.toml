@@ -6,3 +6,6 @@ authors.workspace = true
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
+# Encodes `other_urls` for its TEXT column. Already in the Worker's tree via
+# leptos_server, so this adds nothing to the wasm bundle.
+serde_json = "1"

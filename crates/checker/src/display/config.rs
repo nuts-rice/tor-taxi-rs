@@ -1,7 +1,7 @@
 use crate::display::link_data::Columns;
 use color_eyre::config::Theme;
 use ratatui::style::palette::tailwind;
-use ratatui::style::{self, Color, Modifier, Style, Stylize};
+use ratatui::style::Color;
 use std::time::Duration;
 
 pub const PALETTES: [tailwind::Palette; 4] = [

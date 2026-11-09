@@ -1,13 +1,9 @@
-use anyhow::Context;
-use ratatui::Frame;
 
-use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Color, Style};
-use ratatui::widgets::{Block, BorderType, Borders, Cell, Row, Table};
-use std::fmt::{Debug, Display, Formatter};
+use ratatui::widgets::{Cell, Row};
+use std::fmt::Debug;
 
 use crate::display::config::TuiConfig;
-use crate::TuiApp;
 use crate::LINK_HEIGHT;
 pub use shared::{Link, LinkStatus};
 
@@ -80,9 +76,9 @@ pub fn render_table_row(link: &Link, config: &TuiConfig) -> Row<'static> {
     let mut cells: Vec<Cell<'static>> = Vec::new();
     for column in config.tui_columns.columns() {
         match column.typ {
-            ColumnType::Slug => cells.push(render_slug_cell(&link)),
-            ColumnType::Average => cells.push(render_avg_ms(&link)),
-            ColumnType::Status => cells.push(render_status_cell(&link)),
+            ColumnType::Slug => cells.push(render_slug_cell(link)),
+            ColumnType::Average => cells.push(render_avg_ms(link)),
+            ColumnType::Status => cells.push(render_status_cell(link)),
         }
     }
     Row::new(cells)
@@ -110,10 +106,10 @@ fn render_avg_ms(link: &Link) -> Cell<'static> {
 
 fn render_slug_cell(link: &Link) -> Cell<'static> {
     let slug = &link.slug;
-    Cell::from(format!("{}", slug))
+    Cell::from(slug.to_string())
 }
 
-fn constraint_len_calculator(items: &[Link]) -> (u16, u16, u16) {
+fn constraint_len_calculator(_items: &[Link]) -> (u16, u16, u16) {
     /*
         let slug_len = items
             .iter()

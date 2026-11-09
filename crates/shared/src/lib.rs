@@ -8,7 +8,7 @@
 //! values from Rust, so that list stays hand-maintained -- keep it in step with
 //! [`LinkCategory`]. `schema_drift_is_guarded` fails the build if it drifts.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// The Worker's one query, and the read half of the schema contract.
 ///
@@ -132,7 +132,10 @@ pub struct Link {
     pub url: String,
     pub category: LinkCategory,
     pub description: String,
-    //comma-seperated list of other urls for same service, ... mirrors etc
+    /// Mirrors of the same service. Stored as a JSON array in a TEXT column --
+    /// SQLite has no array type, and `TEXT[]` in `0004_add_urls_to_links.sql`
+    /// is just TEXT affinity. See [`other_urls_to_sql`].
+    #[serde(default, deserialize_with = "other_urls_from_sql")]
     pub other_urls: Option<Vec<String>>,
     /// `None` until the checker has probed it at least once. Not the same as
     /// down -- we simply do not know yet.
@@ -153,5 +156,71 @@ impl Link {
 
     pub fn latency_ms(&self) -> &Option<u64> {
         &self.latency_ms
+    }
+}
+
+/// The write half of the `other_urls` encoding: a JSON array, or NULL when
+/// there are none. An empty list is stored as NULL so "no mirrors" has one
+/// spelling in the table, not two.
+pub fn other_urls_to_sql(urls: Option<&[String]>) -> Option<String> {
+    urls.filter(|u| !u.is_empty())
+        .map(|u| serde_json::to_string(u).expect("a list of strings always serializes"))
+}
+
+/// The read half. Accepts the JSON text D1 hands back, and also a plain list,
+/// since `Link` serializes it as one and must survive its own round trip.
+///
+/// A cell that does not parse reads as no mirrors rather than an error: one
+/// bad mirrors cell must not fail `get_links` and blank the whole directory.
+fn other_urls_from_sql<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<String>>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Raw {
+        Json(String),
+        List(Vec<String>),
+    }
+    Ok(match Option::<Raw>::deserialize(d)? {
+        None => None,
+        Some(Raw::List(urls)) => Some(urls),
+        Some(Raw::Json(text)) => serde_json::from_str(&text).ok(),
+    }
+    .filter(|urls: &Vec<String>| !urls.is_empty()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn row(other_urls: serde_json::Value) -> Link {
+        serde_json::from_value(json!({
+            "slug": "a", "url": "http://a.onion/", "category": "Info",
+            "description": "", "other_urls": other_urls, "status": null,
+            "latency_ms": null, "checked_ago_secs": null, "avg_latency_ms": null,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn other_urls_round_trips_through_its_column() {
+        let urls = vec!["http://b.onion/".to_string(), "http://c.onion/".to_string()];
+        let cell = other_urls_to_sql(Some(&urls)).unwrap();
+        assert_eq!(row(json!(cell)).other_urls, Some(urls.clone()));
+        // And through Link's own Serialize, which emits a list.
+        let back: Link = serde_json::from_value(serde_json::to_value(row(json!(cell))).unwrap()).unwrap();
+        assert_eq!(back.other_urls, Some(urls));
+    }
+
+    #[test]
+    fn no_mirrors_has_one_spelling() {
+        assert_eq!(other_urls_to_sql(None), None);
+        assert_eq!(other_urls_to_sql(Some(&[])), None);
+        assert_eq!(row(json!(null)).other_urls, None);
+        assert_eq!(row(json!("[]")).other_urls, None);
+    }
+
+    #[test]
+    fn a_bad_cell_does_not_fail_the_row() {
+        assert_eq!(row(json!("http://b.onion/,http://c.onion/")).other_urls, None);
     }
 }

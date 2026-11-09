@@ -33,6 +33,10 @@ pub fn load(path: &Path) -> Result<LinkSet> {
 fn validate_set(set: &LinkSet) -> Result<()> {
     for (slug, entry) in set {
         validate_onion_address(&entry.url).with_context(|| format!("`{slug}`: {}", entry.url))?;
+        // Mirrors are probed and rendered as links too, so they meet the same bar.
+        for mirror in entry.other_urls.iter().flatten() {
+            validate_onion_address(mirror).with_context(|| format!("`{slug}` mirror: {mirror}"))?;
+        }
     }
     Ok(())
 }

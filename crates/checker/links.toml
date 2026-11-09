@@ -1,6 +1,6 @@
 [dread]
-url = "https://dreadytofatroptsdj6io7l3xptbet6onoyno2yv7jicoxknyazubrad.onion/"
-description = "it's Dread"
+url = "https://dreadohblesmagfagqup24vw7catlvmqhhce5itz7wxr4vffgemjzaad.onion"
+description = "it's Dread (latest url as of oct 7). "
 category = "Forum"
 
 [dnm_bible]
@@ -29,3 +29,13 @@ category = "ImageUpload"
 url = "http://featherdvtpi7ckdbkb2yxjfwx3oyvr3xjz3oo4rszylfzjdg6pbm3id.onion/"
 description = "feather wallet"
 category = "Service"
+
+[pitch]
+url = "https://pitchprash4aqilfr7sbmuwve3pnkpylqwxjbj2q5o4szcfeea6d27yd.onion/"
+description = "pitch forum"
+category = "Forum"
+
+[tor-watch]
+url="https://tdwatchxhc3g7v4q3lyu2inbp3a74sbi65yxgdyeuztsjxvd4bb6load.onion"
+description = "tor.watch onion url"
+category= "Info"
