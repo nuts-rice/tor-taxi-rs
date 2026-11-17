@@ -144,6 +144,7 @@ mod tests {
             latency_ms: None,
             checked_ago_secs: None,
             avg_latency_ms: None,
+            url_status: None,
         }
     }
 

@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 
-pub use shared::Link;
+pub use shared::{Link, UrlStatus};
 
 fn humanize(secs: i64) -> String {
     match secs {
@@ -8,6 +8,14 @@ fn humanize(secs: i64) -> String {
         s if s < 90 => format!("{s}s ago"),
         s if s < 5400 => format!("{}m ago", s / 60),
         s => format!("{}h ago", s / 3600),
+    }
+}
+
+fn address_dot(s: Option<&UrlStatus>) -> (&'static str, &'static str) {
+    match s {
+        None => ("status unknown", "not yet checked"),
+        Some(s) if s.up => ("status white", "up since last checked"),
+        Some(_) => ("status orange", "unreachable since last checked"),
     }
 }
 
@@ -22,6 +30,7 @@ pub fn ShowLink(link: Link) -> impl IntoView {
         description,
         other_urls,
         status,
+        url_status,
         latency_ms,
         avg_latency_ms,
         checked_ago_secs,
@@ -41,6 +50,13 @@ pub fn ShowLink(link: Link) -> impl IntoView {
     // out loud how old this reading is.
     let freshness = checked_ago_secs.map(|s| format!(" · checked {}", humanize(s)));
 
+    let statuses = url_status.unwrap_or_default();
+    let state_of = |u: &str| statuses.iter().find(|s| s.url == u);
+
+    let mirror_being_used = (state_of(&url).is_some_and(|s| !s.up)
+        && statuses.iter().any(|s| s.up))
+    .then_some("· primary url unreachable, listing mirror");
+
     let mirrors = other_urls.filter(|urls| !urls.is_empty()).map(|urls| {
         view! {
             <details class="mirrors">
@@ -49,8 +65,14 @@ pub fn ShowLink(link: Link) -> impl IntoView {
                     {urls
                         .into_iter()
                         .map(|u| {
+                            let (dot, dot_label) = address_dot(state_of(&u));
                             let href = u.clone();
-                            view! { <li><a href=href rel="noopener noreferrer">{u}</a></li> }
+                            view! {
+                                <li>
+                                <span class=dot title=dot_label></span>
+                                <a href=href rel="noopener noreferrer">{u}</a>
+                                </li>
+                            }
                         })
                         .collect_view()}
                 </ul>
@@ -65,7 +87,7 @@ pub fn ShowLink(link: Link) -> impl IntoView {
             <div class="body">
                 <a class="name" href=url.clone() title=url rel="noopener noreferrer">{slug}</a>
                 <p class="description">{description}</p>
-                <p class="meta">{label}{latency}{freshness}</p>
+                <p class="meta">{label}{latency}{freshness}{mirror_being_used}</p>
                 {mirrors}
             </div>
         </li>

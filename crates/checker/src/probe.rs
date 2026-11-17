@@ -229,12 +229,21 @@ async fn read_capped(mut resp: reqwest::Response, cap: usize) -> Result<String> 
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
-/// Decides whether a page is the service links.toml says it is.
-///
+/// TODO: is this really needed or would work?
 /// `expected` is the `expected_content` string from links.toml; `body` is the
 /// first `MAX_BODY_BYTES` of the response, lossily decoded as UTF-8.
 fn content_verdict(expected: &str, body: &str) -> ContentCheck {
-    // TODO(human)
-    let _ = (expected, body);
-    ContentCheck::Inconclusive
+    if is_anti_ddos(body) {
+        return ContentCheck::Inconclusive;
+    }
+
+    todo!()
+}
+
+fn is_anti_ddos(body: &str) -> bool {
+    if (body == "click anywhere to enter...") {
+        return true;
+    }
+
+    false
 }
