@@ -221,9 +221,13 @@ impl TuiApp {
                     other_urls: entry.other_urls.clone(),
                     category: entry.category,
                     description: entry.description.clone(),
-                    status: result.map(|_| {
-                        self.status_policy
-                            .classify(latency, tally.consecutive_failures)
+                    url_status: result.map(|r| r.url_status()),
+                    status: result.map(|r| {
+                        self.status_policy.classify(
+                            latency,
+                            tally.consecutive_failures,
+                            r.content_mismatch(),
+                        )
                     }),
                     latency_ms: latency.map(|l| l.as_millis() as u64),
                     checked_ago_secs: None,
@@ -483,7 +487,7 @@ mod test {
         RECORD_SQL, RELEASE_URL_SQL, UPSERT_SQL,
     };
     use crate::links::LinkSet;
-    use crate::probe::{Outcome, ProbeResult};
+    use crate::probe::{Outcome, ProbeResult, UrlProbe};
     use crate::status::StatusPolicy;
     use rusqlite::{params, params_from_iter, types::Value as SqlValue, Connection};
     use serde_json::Value;
@@ -500,6 +504,7 @@ mod test {
         include_str!("../../worker/migrations/0002_add_probes.sql"),
         include_str!("../../worker/migrations/0003_add_avg_to_probes.sql"),
         include_str!("../../worker/migrations/0004_add_urls_to_links.sql"),
+        include_str!("../../worker/migrations/0005_add_url_status_to_links.sql"),
     ];
 
     const POLICY: StatusPolicy = StatusPolicy {
@@ -538,7 +543,7 @@ mod test {
                     slug.to_string(),
                     LinkEntry {
                         url: url.to_string(),
-                        other_urls: None, 
+                        other_urls: None,
                         category: LinkCategory::Info,
                         description: "desc".into(),
                         expected_content: None,
@@ -549,9 +554,8 @@ mod test {
 
         let results: Vec<ProbeResult> = probe
             .iter()
-            .map(|(slug, up, latency)| ProbeResult {
-                slug: slug.to_string(),
-                outcome: if *up {
+            .map(|(slug, up, latency)| {
+                let outcome = if *up {
                     Outcome::Reachable {
                         latency: Duration::from_millis(latency.expect("an up probe has a latency")),
                     }
@@ -559,7 +563,16 @@ mod test {
                     Outcome::Unreachable {
                         reason: "test".into(),
                     }
-                },
+                };
+                let url = links.get(*slug).map(|l| l.url.clone()).unwrap_or_default();
+                ProbeResult::from_urls(
+                    *slug,
+                    vec![UrlProbe {
+                        url,
+                        outcome,
+                        content: None,
+                    }],
+                )
             })
             .collect();
 
@@ -634,10 +647,16 @@ mod test {
             )]
             .into()
         };
-        let up = [ProbeResult {
-            slug: "a".into(),
-            outcome: Outcome::Reachable { latency: Duration::from_millis(100) },
-        }];
+        let up = [ProbeResult::from_urls(
+            "a",
+            vec![UrlProbe {
+                url: "http://a.onion/".into(),
+                outcome: Outcome::Reachable {
+                    latency: Duration::from_millis(100),
+                },
+                content: None,
+            }],
+        )];
         // What D1 hands the Worker for the column, decoded the way the Worker
         // decodes it.
         let read = |conn: &Connection| -> Option<Vec<String>> {
@@ -657,7 +676,11 @@ mod test {
         assert_eq!(read(&conn), Some(mirrors));
 
         replay(&conn, &set(None), &up, 2_000);
-        assert_eq!(read(&conn), None, "a mirror removed from links.toml must stop rendering");
+        assert_eq!(
+            read(&conn),
+            None,
+            "a mirror removed from links.toml must stop rendering"
+        );
     }
 
     #[test]
@@ -918,9 +941,110 @@ mod test {
         assert_eq!(live, 1, "a live row was deleted to free its url");
 
         assert!(
-            conn.execute(UPSERT_SQL, params!["b", "http://shared.onion/", "Info", "", None::<String>])
-                .is_err(),
+            conn.execute(
+                UPSERT_SQL,
+                params!["b", "http://shared.onion/", "Info", "", None::<String>]
+            )
+            .is_err(),
             "a duplicate url must fail rather than silently rewrite the table"
+        );
+    }
+
+    fn url_probe(
+        url: &str,
+        latency_ms: Option<u64>,
+        content: Option<shared::ContentCheck>,
+    ) -> UrlProbe {
+        UrlProbe {
+            url: url.into(),
+            outcome: match latency_ms {
+                Some(ms) => Outcome::Reachable {
+                    latency: Duration::from_millis(ms),
+                },
+                None => Outcome::Unreachable {
+                    reason: "test".into(),
+                },
+            },
+            content,
+        }
+    }
+
+    #[test]
+    fn a_mirror_carries_a_dead_primary_with_its_own_latency() {
+        let r = ProbeResult::from_urls(
+            "a",
+            vec![
+                url_probe("http://a.onion/", None, None),
+                url_probe("http://m1.onion", Some(4_000), None),
+                url_probe("http://m2.onion", Some(900), None),
+            ],
+        );
+        assert!(r.is_up());
+        assert_eq!(
+            r.latency_ms(),
+            Some(900),
+            "fastest mirror, not time spent failing"
+        );
+
+        let primary_up = ProbeResult::from_urls(
+            "a",
+            vec![
+                url_probe("http://a.onion", Some(2_000), None),
+                url_probe("http://m.onion", Some(100), None),
+            ],
+        );
+        assert_eq!(primary_up.latency_ms(), Some(2_000), "address for lead");
+    }
+
+    #[test]
+    fn url_status_reaches_the_worker() {
+        let conn = migrated();
+        let links: LinkSet = [(
+            "a".to_string(),
+            LinkEntry {
+                url: "http://a.onion".into(),
+                other_urls: Some(vec!["http://m.onion".into()]),
+                category: LinkCategory::Info,
+                description: "description".to_string(),
+                expected_content: None,
+            },
+        )]
+        .into();
+        let results = [ProbeResult::from_urls(
+            "a",
+            vec![
+                url_probe("http://a.onion", None, None),
+                url_probe("http://m.onion", Some(700), None),
+            ],
+        )];
+        replay(&conn, &links, &results, 1_000);
+        let cell: Option<String> = conn
+            .query_row(SELECT_LINKS_SQL, [], |r| r.get("url_status"))
+            .unwrap();
+        let row: shared::Link = serde_json::from_value(serde_json::json!(
+        {
+            "slug": "a", "url": "", "category": "Info", "description": "",
+            "other_urls": null, "url_status": cell, "status": null, "latency_ms": null,
+            "checked_ago_secs": null, "avg_latency_ms": null
+        }))
+        .unwrap();
+        let shape: Vec<_> = row
+            .url_status
+            .unwrap()
+            .into_iter()
+            .map(|u| (u.url, u.up, u.latency_ms))
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                ("http://a.onion".into(), false, None),
+                ("http://m.onion".into(), true, Some(700))
+            ]
+        );
+        assert_eq!(
+            status_of(&conn, "a").as_deref(),
+            Some("White"),
+            "working mirror keeps link up"
         );
     }
 }

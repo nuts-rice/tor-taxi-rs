@@ -30,3 +30,4 @@ color-eyre = "0.6.5"
 # Tests only: the checker talks to D1 over HTTP and never links SQLite at
 # runtime. A dev-dependency keeps it out of the cross-compiled ARM binary.
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+proptest = "1.12"

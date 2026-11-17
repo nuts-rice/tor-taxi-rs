@@ -8,6 +8,7 @@
 //! values from Rust, so that list stays hand-maintained -- keep it in step with
 //! [`LinkCategory`]. `schema_drift_is_guarded` fails the build if it drifts.
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// The Worker's one query, and the read half of the schema contract.
@@ -23,7 +24,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 /// `retired_at IS NULL` is the delisting filter. A retired row keeps its probe
 /// history but stops rendering; see `0001_add_retired_at.sql`.
 pub const SELECT_LINKS_SQL: &str = "\
-SELECT slug, url, category, other_urls, description, status, latency_ms, \
+SELECT slug, url, category, other_urls, url_status, description, status, latency_ms, \
        (strftime('%s', 'now') - last_checked_at) AS checked_ago_secs, \
     (SELECT CAST(round(p.avg_latency_ms) AS INTEGER) \
         FROM probes p \
@@ -110,6 +111,35 @@ impl LinkStatus {
     }
 }
 
+/// What a reachable page's body said about who is serving it, checked against
+/// `expected_content` in links.toml.
+///
+/// Three-valued on purpose. Onion services often answer through an anti-DDoS
+/// queue page that carries none of the real site's text, and treating that as
+/// a mismatch would flag every busy service as an impostor. `Inconclusive` is
+/// "we got a page, but not one that can tell us anything".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub enum ContentCheck {
+    Match,
+    Mismatch,
+    Inconclusive,
+}
+
+/// The latest sweep's result for one address -- a link's primary url or one
+/// of its mirrors.
+///
+/// A single sample, not a status: the consecutive-failure rule that turns
+/// probes into a dot applies to the link as a whole, not to each address.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct UrlStatus {
+    pub url: String,
+    pub up: bool,
+    pub latency_ms: Option<u64>,
+    /// `None` when the link has no `expected_content`, or the address was down.
+    #[serde(default)]
+    pub content: Option<ContentCheck>,
+}
+
 /// One entry in `crates/checker/links.toml` -- the editorial input.
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -135,8 +165,12 @@ pub struct Link {
     /// Mirrors of the same service. Stored as a JSON array in a TEXT column --
     /// SQLite has no array type, and `TEXT[]` in `0004_add_urls_to_links.sql`
     /// is just TEXT affinity. See [`other_urls_to_sql`].
-    #[serde(default, deserialize_with = "other_urls_from_sql")]
+    #[serde(default, deserialize_with = "json_list_from_sql")]
     pub other_urls: Option<Vec<String>>,
+    /// Per-address results from the latest sweep, primary first. Same JSON
+    /// encoding as `other_urls`; see [`json_list_to_sql`].
+    #[serde(default, deserialize_with = "json_list_from_sql")]
+    pub url_status: Option<Vec<UrlStatus>>,
     /// `None` until the checker has probed it at least once. Not the same as
     /// down -- we simply do not know yet.
     pub status: Option<LinkStatus>,
@@ -163,28 +197,38 @@ impl Link {
 /// there are none. An empty list is stored as NULL so "no mirrors" has one
 /// spelling in the table, not two.
 pub fn other_urls_to_sql(urls: Option<&[String]>) -> Option<String> {
-    urls.filter(|u| !u.is_empty())
-        .map(|u| serde_json::to_string(u).expect("a list of strings always serializes"))
+    json_list_to_sql(urls)
+}
+
+/// The write half of every JSON-list column (`other_urls`, `url_status`).
+pub fn json_list_to_sql<T: Serialize>(items: Option<&[T]>) -> Option<String> {
+    items
+        .filter(|i| !i.is_empty())
+        .map(|i| serde_json::to_string(i).expect("plain data always serializes"))
 }
 
 /// The read half. Accepts the JSON text D1 hands back, and also a plain list,
 /// since `Link` serializes it as one and must survive its own round trip.
 ///
-/// A cell that does not parse reads as no mirrors rather than an error: one
-/// bad mirrors cell must not fail `get_links` and blank the whole directory.
-fn other_urls_from_sql<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<String>>, D::Error> {
+/// A cell that does not parse reads as empty rather than an error: one bad
+/// cell must not fail `get_links` and blank the whole directory.
+fn json_list_from_sql<'de, D, T>(d: D) -> Result<Option<Vec<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: DeserializeOwned,
+{
     #[derive(Deserialize)]
     #[serde(untagged)]
-    enum Raw {
+    enum Raw<T> {
         Json(String),
-        List(Vec<String>),
+        List(Vec<T>),
     }
-    Ok(match Option::<Raw>::deserialize(d)? {
+    Ok(match Option::<Raw<T>>::deserialize(d)? {
         None => None,
-        Some(Raw::List(urls)) => Some(urls),
+        Some(Raw::List(items)) => Some(items),
         Some(Raw::Json(text)) => serde_json::from_str(&text).ok(),
     }
-    .filter(|urls: &Vec<String>| !urls.is_empty()))
+    .filter(|items: &Vec<T>| !items.is_empty()))
 }
 
 #[cfg(test)]
@@ -207,7 +251,8 @@ mod tests {
         let cell = other_urls_to_sql(Some(&urls)).unwrap();
         assert_eq!(row(json!(cell)).other_urls, Some(urls.clone()));
         // And through Link's own Serialize, which emits a list.
-        let back: Link = serde_json::from_value(serde_json::to_value(row(json!(cell))).unwrap()).unwrap();
+        let back: Link =
+            serde_json::from_value(serde_json::to_value(row(json!(cell))).unwrap()).unwrap();
         assert_eq!(back.other_urls, Some(urls));
     }
 
@@ -220,7 +265,36 @@ mod tests {
     }
 
     #[test]
+    fn url_status_round_trips_through_its_column() {
+        let statuses = vec![
+            UrlStatus {
+                url: "http://a.onion/".into(),
+                up: false,
+                latency_ms: None,
+                content: None,
+            },
+            UrlStatus {
+                url: "http://b.onion/".into(),
+                up: true,
+                latency_ms: Some(900),
+                content: Some(ContentCheck::Mismatch),
+            },
+        ];
+        let cell = json_list_to_sql(Some(&statuses)).unwrap();
+        let r: Link = serde_json::from_value(json!({
+            "slug": "a", "url": "http://a.onion/", "category": "Info",
+            "description": "", "other_urls": null, "url_status": cell, "status": null,
+            "latency_ms": null, "checked_ago_secs": null, "avg_latency_ms": null,
+        }))
+        .unwrap();
+        assert_eq!(r.url_status, Some(statuses));
+    }
+
+    #[test]
     fn a_bad_cell_does_not_fail_the_row() {
-        assert_eq!(row(json!("http://b.onion/,http://c.onion/")).other_urls, None);
+        assert_eq!(
+            row(json!("http://b.onion/,http://c.onion/")).other_urls,
+            None
+        );
     }
 }

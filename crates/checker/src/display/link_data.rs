@@ -1,4 +1,3 @@
-
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Cell, Row};
 use std::fmt::Debug;

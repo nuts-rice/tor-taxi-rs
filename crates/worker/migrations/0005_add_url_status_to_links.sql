@@ -1,0 +1,12 @@
+-- Migration number: 0005 	 2026-11-17T00:00:00.000Z
+--
+-- The latest sweep's result for each address a link has -- its primary url
+-- and every mirror -- as a JSON array of shared::UrlStatus, primary first.
+--
+-- On links rather than as a url column on probes: probes is keyed on
+-- (slug, checked_at) WITHOUT ROWID, and widening that key means rebuilding the
+-- table, which needs the DROP this directory never runs. Only the latest
+-- per-address reading is kept; the link-level history in probes is unchanged.
+--
+-- NULL until the first sweep after this migration.
+ALTER TABLE links ADD COLUMN url_status TEXT;

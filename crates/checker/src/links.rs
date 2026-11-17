@@ -23,14 +23,19 @@ pub type LinkSet = BTreeMap<String, LinkEntry>;
 pub fn load(path: &Path) -> Result<LinkSet> {
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("reading link set from {}", path.display()))?;
-    let set: LinkSet =
-        toml::from_str(&raw).with_context(|| format!("parsing {}", path.display()))?;
-    check_unique_urls(&set).with_context(|| format!("parsing {}", path.display()))?;
-    validate_set(&set).with_context(|| format!("validating {}", path.display()))?;
+    parse(&raw).with_context(|| format!("loading {}", path.display()))
+}
+
+/// Everything [`load`] does after the read. Split out so the fuzz targets and
+/// property tests can drive it without touching the filesystem.
+pub fn parse(raw: &str) -> Result<LinkSet> {
+    let set: LinkSet = toml::from_str(raw).context("parsing")?;
+    check_unique_urls(&set).context("parsing")?;
+    validate_set(&set).context("validating")?;
     Ok(set)
 }
 
-fn validate_set(set: &LinkSet) -> Result<()> {
+pub fn validate_set(set: &LinkSet) -> Result<()> {
     for (slug, entry) in set {
         validate_onion_address(&entry.url).with_context(|| format!("`{slug}`: {}", entry.url))?;
         // Mirrors are probed and rendered as links too, so they meet the same bar.
@@ -41,7 +46,7 @@ fn validate_set(set: &LinkSet) -> Result<()> {
     Ok(())
 }
 
-fn validate_onion_address(raw: &str) -> Result<()> {
+pub fn validate_onion_address(raw: &str) -> Result<()> {
     const CHECKSUM_PREFIX: &[u8] = b".onion checksum";
     const VERSION: u8 = 3;
     let url = Url::parse(raw).context("not an url ")?;
@@ -87,7 +92,7 @@ fn validate_onion_address(raw: &str) -> Result<()> {
 /// sweep, until someone reads the journal. The checker's own retry does not
 /// help: the next sweep sends the identical batch. Failing here instead means
 /// a bad edit is caught at load, by the process that can name both slugs.
-fn check_unique_urls(set: &LinkSet) -> Result<()> {
+pub fn check_unique_urls(set: &LinkSet) -> Result<()> {
     let mut seen: BTreeMap<&str, &str> = BTreeMap::new();
     for (slug, entry) in set {
         if let Some(first) = seen.insert(entry.url.as_str(), slug.as_str()) {
@@ -101,18 +106,28 @@ fn check_unique_urls(set: &LinkSet) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn load_str(body: &str) -> Result<LinkSet> {
-        let path =
-            std::env::temp_dir().join(format!("links-{}-{:p}.toml", std::process::id(), body));
-        std::fs::write(&path, body).unwrap();
-        let out = load(&path);
-        let _ = std::fs::remove_file(&path);
-        out
+    /// A real v3 onion label for `pubkey`, built the way Tor builds one. The
+    /// encode direction, written independently of the decode in
+    /// [`validate_onion_address`], so the two can check each other.
+    pub(super) fn v3_label(pubkey: &[u8; 32]) -> String {
+        let checksum = Sha3_256::new()
+            .chain_update(b".onion checksum")
+            .chain_update(pubkey)
+            .chain_update([3u8])
+            .finalize();
+        let mut bytes = pubkey.to_vec();
+        bytes.extend_from_slice(&checksum[..2]);
+        bytes.push(3);
+        BASE32_NOPAD.encode(&bytes).to_ascii_lowercase()
+    }
+
+    pub(super) fn v3_url(pubkey: &[u8; 32]) -> String {
+        format!("http://{}.onion/", v3_label(pubkey))
     }
 
     #[test]
     fn a_duplicate_url_is_rejected_by_name() {
-        let err = load_str(
+        let err = parse(
             r#"
 [dread]
 url = "http://d.onion/"
@@ -135,24 +150,26 @@ category = "Forum"
 
     #[test]
     fn an_unknown_category_names_the_offending_table() {
-        let err = load_str("[x]\nurl = \"http://x.onion/\"\ncategory = \"Forumm\"\n").unwrap_err();
+        let err = parse("[x]\nurl = \"http://x.onion/\"\ncategory = \"Forumm\"\n").unwrap_err();
         assert!(format!("{err:#}").contains("Forumm"));
     }
 
     #[test]
     fn distinct_urls_load() {
-        let set = load_str(
+        let set = parse(&format!(
             r#"
 [a]
-url = "http://a.onion/"
+url = "{}"
 category = "Info"
 
 [b]
-url = "http://b.onion/"
+url = "{}"
 category = "News"
 description = "b"
 "#,
-        )
+            v3_url(&[1; 32]),
+            v3_url(&[2; 32]),
+        ))
         .unwrap();
         assert_eq!(set.len(), 2);
     }
@@ -161,5 +178,38 @@ description = "b"
     #[test]
     fn the_shipped_links_toml_is_valid() {
         load(std::path::Path::new("links.toml")).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod props {
+    use super::tests::{v3_label, v3_url};
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// Any real v3 address must pass validation.
+        #[test]
+        fn a_real_v3_address_is_accepted(key in any::<[u8; 32]>()) {
+            prop_assert!(validate_onion_address(&v3_url(&key)).is_ok())
+        }
+
+        #[test]
+        fn a_real_v3_address_with_either_url_scheme_is_accepted(https in any::<bool>(), key in any::<[u8; 32]>()) {
+            let label = v3_label(&key);
+            let url_scheme = if https {"https"} else {"http"};
+            let url = format!("{url_scheme}://{}.onion", label);
+            let res = validate_onion_address(&url);
+            prop_assert!(res.is_ok(), "{url}: {:#}", res.unwrap_err());
+        }
+        #[test]
+        fn a_typo_in_checksum_is_rejected(
+            key in any::<[u8; 32]>(),
+            pos in 52usize..56,
+            shift in 1usize..32,
+        )  {
+            const BASE32: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
+            let label = v3_label(&key).into_bytes();
+        }
     }
 }

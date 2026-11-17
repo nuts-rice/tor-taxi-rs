@@ -64,6 +64,11 @@ pub(crate) fn retire_sql(live: usize) -> String {
 
 /// Applies the status rule. Built once at first use because the status literals
 /// come from `LinkStatus::as_sql()` rather than being typed in here.
+///
+/// `?7` is the per-address JSON ([`shared::UrlStatus`]); `?8` is 1 when any
+/// address served a page that failed its `expected_content` check. A mismatch
+/// caps a reachable link at Orange however fast it answered: "up" is a claim
+/// that the *service* is there, not merely something at its address.
 pub static RECORD_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "UPDATE links SET \
@@ -71,7 +76,9 @@ pub static RECORD_SQL: LazyLock<String> = LazyLock::new(|| {
            latency_ms = ?3, \
            last_good_at = CASE WHEN ?2 = 1 THEN ?4 ELSE last_good_at END, \
            last_checked_at = ?4, \
+           url_status = ?7, \
            status = CASE \
+             WHEN ?2 = 1 AND ?8 = 1 THEN '{orange}' \
              WHEN ?2 = 1 AND ?3 >= ?5 THEN '{orange}' \
              WHEN ?2 = 1 THEN '{white}' \
              WHEN consecutive_failures + 1 >= ?6 THEN '{red}' \
@@ -175,6 +182,8 @@ pub(crate) fn build_batch(
                 now,
                 orange_ms,
                 policy.red_after,
+                shared::json_list_to_sql(Some(&result.url_status())),
+                if result.content_mismatch() { 1 } else { 0 },
             ],
         }));
         batch.push(json!({

@@ -2,6 +2,7 @@
 //!
 //! | condition                        | status   |
 //! |----------------------------------|----------|
+//! | reachable, content mismatch      | `Orange` |
 //! | reachable, faster than `orange_after` | `White`  |
 //! | reachable, at or over it         | `Orange` |
 //! | 1..`red_after` consecutive failures   | `Orange` |
@@ -28,9 +29,11 @@ impl StatusPolicy {
         &self,
         latency: Option<Duration>,
         consecutive_failures: u32,
+        content_mismatch: bool,
     ) -> shared::LinkStatus {
         use shared::LinkStatus::{Orange, Red, White};
         match latency {
+            Some(_) if content_mismatch => Orange,
             Some(l) if l >= self.orange_after => Orange,
             Some(_) => White,
             None if consecutive_failures >= self.red_after => Red,
