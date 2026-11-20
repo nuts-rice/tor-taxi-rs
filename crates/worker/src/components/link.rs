@@ -2,7 +2,7 @@ use leptos::prelude::*;
 
 pub use shared::{Link, UrlStatus};
 
-fn humanize(secs: i64) -> String {
+pub(crate) fn humanize(secs: i64) -> String {
     match secs {
         s if s < 0 => "just now".to_string(),
         s if s < 90 => format!("{s}s ago"),

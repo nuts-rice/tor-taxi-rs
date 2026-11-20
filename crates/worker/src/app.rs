@@ -7,9 +7,10 @@ use leptos_router::{
     StaticSegment,
 };
 
-use crate::api::get_links;
+use crate::api::{get_links, DirectoryData};
 use crate::components::chrome::{Footer, Legend, Masthead};
 use crate::components::directory::Directory;
+use crate::components::sweep::SweepBanner;
 
 #[cfg(feature = "ssr")]
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -65,7 +66,10 @@ fn HomePage() -> impl IntoView {
             <Suspense fallback=|| view! { <p class="loading">"Loading directory…"</p> }>
                 {move || Suspend::new(async move {
                     match links.await {
-                        Ok(links) => view! { <Directory links/> }.into_any(),
+                        Ok(DirectoryData{links, last_sweep_agos_secs} ) => view!{
+                            <SweepBanner ago_secs=last_sweep_agos_secs/>
+                            <Directory links/>
+                        }.into_any(),
                         Err(e) => {
                             view! { <p class="error">{format!("Could not load links: {e}")}</p> }
                                 .into_any()

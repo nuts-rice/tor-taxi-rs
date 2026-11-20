@@ -491,7 +491,7 @@ mod test {
     use crate::status::StatusPolicy;
     use rusqlite::{params, params_from_iter, types::Value as SqlValue, Connection};
     use serde_json::Value;
-    use shared::{LinkCategory, LinkEntry, SELECT_LINKS_SQL};
+    use shared::{LinkCategory, LinkEntry, SELECT_LAST_SWEEP_SQL, SELECT_LINKS_SQL};
     use std::time::Duration;
 
     /// Every migration, in the order wrangler applies them. Listed rather than
@@ -622,6 +622,7 @@ mod test {
             // tested in place, so this is the one thing standing between a
             // malformed SELECT and a blank directory.
             ("SELECT_LINKS_SQL", SELECT_LINKS_SQL.to_string()),
+            ("SELECT_LAST_SWEEP_SQL", SELECT_LAST_SWEEP_SQL.to_string()),
         ] {
             conn.prepare(&sql)
                 .unwrap_or_else(|e| panic!("{name} does not match the schema: {e}"));
@@ -852,6 +853,35 @@ mod test {
         assert_eq!(
             rows,
             [("dread_forum".to_string(), "http://d.onion/".to_string())]
+        );
+    }
+
+    #[test]
+    fn last_sweep_is_newest() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        const AB: &[(&str, &str)] = &[("a", "http://a.onion/"), ("b", "http://b.onion/")];
+        let conn = migrated();
+        let elapsed = |conn: &Connection| -> Option<i64> {
+            conn.query_row(SELECT_LAST_SWEEP_SQL, [], |r| r.get("ago_secs"))
+                .unwrap()
+        };
+
+        assert_eq!(elapsed(&conn), None, "not stale yet");
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        sweep(
+            &conn,
+            AB,
+            &[("a", true, Some(200)), ("b", false, None)],
+            now - 600,
+        );
+        sweep(&conn, AB, &[("a", true, Some(200))], now - 60);
+        let actual = elapsed(&conn).unwrap();
+        assert!(
+            (60..=65).contains(&actual),
+            "expected 60..65 seconds got {actual}"
         );
     }
 
