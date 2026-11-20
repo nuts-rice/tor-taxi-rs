@@ -34,6 +34,11 @@ SELECT slug, url, category, other_urls, url_status, description, status, latency
  WHERE retired_at IS NULL \
  ORDER BY category, slug";
 
+pub const SELECT_LAST_SWEEP_SQL: &str = "\
+SELECT (strftime('%s', 'now') - max(last_checked_at)) AS ago_secs \
+FROM links \
+WHERE retired_at IS NULL";
+
 /// Mirrors the `CHECK (category IN (...))` list in `0000_initial.sql`.
 ///
 /// Serde matches variant names exactly, so the SQL spelling and the Rust

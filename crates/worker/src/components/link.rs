@@ -117,4 +117,23 @@ mod tests {
         assert_eq!(humanize(5_400), "1h ago");
         assert_eq!(humanize(7_000), "1h ago");
     }
+
+    #[test]
+    fn an_address_dot_never_claims_more_than_one() {
+        use super::address_dot;
+        use shared::{ContentCheck, UrlStatus};
+        let s = |up, content| UrlStatus {
+            url: String::new(),
+            up,
+            latency_ms: None,
+            content,
+        };
+        assert_eq!(address_dot(None).0, "status unknown");
+        assert_eq!(address_dot(Some(&s(true, None))).0, "status white");
+        assert_eq!(
+            address_dot(Some(&s(false, None))).0,
+            "status orange",
+            "one miss is not Red"
+        );
+    }
 }
